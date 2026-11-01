@@ -1,45 +1,43 @@
 # Notbad
 
-> **A modern and *notbad* reimagining of the traditional notepad text editor, keeping the lightweight soul you love with the power features you need.**
+> **A modern and *notbad* reimagining of the traditional Notepad text editor—retaining the lightweight spirit you love, while adding the powerful features you need.**
 
 ---
 
-O **Notbad** é um editor de texto leve e minimalista nativo para Windows (C++/Win32), inspirado diretamente no visual clássico do **Windows 10 Notepad**. O projeto nasceu a partir de uma engenharia reversa detalhada da ferramenta original da Microsoft via Ghidra, migrando o código C bruto para C++ moderno. 
+**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), directly inspired by the classic look of the **Windows 10 Notepad**. The project originated from a detailed reverse-engineering of Microsoft’s original tool using Ghidra, migrating the raw C code into modern C++.
 
-Mantendo a alma veloz e a ausência de barras de ferramentas poluídas, o Notbad evoluiu para se transformar em um poderoso mini editor de código, trazendo recursos essenciais sem perder a sua leveza característica.
+While preserving its lightning-fast nature and clutter-free interface—devoid of intrusive toolbars—Notbad has evolved into a powerful, compact code editor, incorporating essential features without sacrificing its signature lightweight performance.
 
 ---
 
-## 🚀 Principais Funcionalidades
+## 🚀 Key Features
 
-O projeto preserva os princípios de interface clássicos (Janela de Edição, Menu e Barra de Status), mas expande as capacidades internas do editor com as seguintes implementações:
+The project upholds classic interface principles (Editing Window, Menu, and Status Bar) while expanding the editor’s internal capabilities with the following implementations:
 
-### 📑 Interface Avançada de Abas
-* **Múltiplos Documentos:** Chega de abrir dezenas de janelas. O Notbad gerencia arquivos em abas através de um controle nativo com suporte a reordenação por arrastar e soltar (drag-and-drop).
-* **Indicador de Modificação:** Arquivos alterados e não salvos exibem um marcador visual `*` antes do nome na aba.
-* **Salvamento em Lote:** Atalho universal para Salvar Tudo (`Ctrl+Alt+S`) e fechar abas individuais de forma modular (`Ctrl+F4`).
+### 📑 Advanced Tabbed Interface
+* **Multiple Documents:** No more juggling dozens of separate windows. Notbad manages files via tabs, featuring native support for drag-and-drop reordering.
+* **Modification Indicator:** Unsaved changes are marked with a visual `*` next to the filename in the tab.
+* **Batch Saving:** Includes a universal "Save All" shortcut (`Ctrl+Alt+S`) and the ability to close individual tabs (`Ctrl+F4`).
 
-### 📂 Painel de Arquivos Sob Demanda (TreeView)
-* **Exploração de Projetos:** Ao abrir uma pasta (`Ctrl+Shift+O`), um painel lateral em árvore é renderizado dinamicamente utilizando os ícones nativos do sistema operacional. Agora é possível editar projetos inteiros sem sair do Notbad.
+### 📂 On-Demand File Panel (TreeView)
+* **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) triggers a dynamic, tree-based side panel that utilizes the operating system’s native icons. You can now edit entire projects without ever leaving Notbad. ### 🔢 Dynamic Line Number Gutter
+* **Logical Numbering:** The gutter calculates line numbers intelligently. Long lines that undergo automatic wrapping (*Word Wrap*) share the same line number, preserving the document's logical line count.
 
-### 🔢 Gutter Dinâmico de Números de Linha
-* **Numeração Lógica:** O gutter calcula os números de linha de forma inteligente. Linhas longas que sofrem quebra de linha automática (*Word Wrap*) compartilham o mesmo número, preservando a contagem lógica do documento.
+### ✍️ Intelligent Editing & Coding Features
+* **Advanced RichEdit Engine:** Migration from the classic Edit control to RichEdit, enabling native support for **multi-level Undo** (multiple `Ctrl+Z` operations).
+* **Advanced Indentation:** A dedicated dialog for managing spacing, automatic conversion between tabs and spaces, and support for indenting/unindenting selected blocks using `Tab` / `Shift+Tab`.
 
-### ✍️ Recursos Inteligentes de Edição & Código
-* **Motor RichEdit Avançado:** Migração do controle Edit clássico para (RichEdit), habilitando suporte nativo a **Undo multinível** (múltiplos `Ctrl+Z`).
-* **Indentação Avançada:** Diálogo exclusivo para gerenciamento de espaçamento, conversão automática de Tabs em Espaços (e vice-versa), e suporte a recuo de blocos selecionados usando `Tab` / `Shift+Tab`.
-
-### 🔍 Busca Avançada Multi-Abas (Modeless)
-* **Escopo Global:** O novo diálogo de Localizar e Substituir permite realizar buscas refinadas e substituições em lote que varrem **todos os arquivos abertos em todas as abas** simultaneamente.
+### 🔍 Advanced Multi-Tab Search (Modeless)
+* **Global Scope:** The new Find and Replace dialog allows for refined searches and batch replacements that scan **all open files across all tabs** simultaneously.
 
 
-## 👥 Créditos e Equipe do Projeto
+## 👥 Credits and Project Team
 
-O desenvolvimento e a evolução do Notbad são mantidos por:
+The development and evolution of Notbad are driven by:
 
-* 👑 **Aless (MaulSmoke)** — Gerente de Projeto, Conceito & Revisão de Código
-* 💻 **opencode** — Desenvolvimento do Core C++, Arquitetura Inicial & Refatoração (v141 Toolset)
-* ⚡ **claudecode** — Desenvolvimento de Funcionalidades Avançadas, Otimização Win32 & Correção de Bugs
+* 👑 **Aless (MaulSmoke)** — Project Manager, Concept & Code Review
+* 💻 **opencode** — Core C++ Development, Initial Architecture & Refactoring (v141 Toolset)
+* ⚡ **claudecode** — Development of Advanced Features, Win32 Optimization & Bug Fixing
 
 ---
 *Notbad Editor — Lightweight soul, power features.*

@@ -1,43 +1,70 @@
 # Notbad
 
-> **A modern and *notbad* reimagining of the traditional Notepad text editor—retaining the lightweight spirit you love, while adding the powerful features you need.**
+> **A modern and *notbad* reimagining of the traditional Notepad text editor, keeping the lightweight soul you love with the power features you need.**
 
 ---
 
-**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), directly inspired by the classic look of the **Windows 10 Notepad**. The project originated from a detailed reverse-engineering of Microsoft’s original tool using Ghidra, migrating the raw C code into modern C++.
+**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), inspired by the classic look of the **Windows 10 Notepad**.
 
-While preserving its lightning-fast nature and clutter-free interface—devoid of intrusive toolbars—Notbad has evolved into a powerful, compact code editor, incorporating essential features without sacrificing its signature lightweight performance.
+It keeps the fast, clutter-free interface (no toolbars, just the editing window, menu and status bar) while adding the features of a compact code editor, without giving up its lightweight performance.
 
 ---
 
 ## 🚀 Key Features
 
-The project upholds classic interface principles (Editing Window, Menu, and Status Bar) while expanding the editor’s internal capabilities with the following implementations:
+### 📑 Tabbed interface
 
-### 📑 Advanced Tabbed Interface
-* **Multiple Documents:** No more juggling dozens of separate windows. Notbad manages files via tabs, featuring native support for drag-and-drop reordering.
-* **Modification Indicator:** Unsaved changes are marked with a visual `*` next to the filename in the tab.
-* **Batch Saving:** Includes a universal "Save All" shortcut (`Ctrl+Alt+S`) and the ability to close individual tabs (`Ctrl+F4`).
+- **Multiple documents:** files are managed in tabs, with drag-and-drop reordering and a close button on each tab.
+- **Modification indicator:** unsaved changes are marked with `* ` before the file name in the tab.
+- **Batch saving:** *Save All* (`Ctrl+Alt+S`) and *Close Tab* (`Ctrl+F4`).
 
-### 📂 On-Demand File Panel (TreeView)
-* **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) triggers a dynamic, tree-based side panel that utilizes the operating system’s native icons. You can now edit entire projects without ever leaving Notbad. ### 🔢 Dynamic Line Number Gutter
-* **Logical Numbering:** The gutter calculates line numbers intelligently. Long lines that undergo automatic wrapping (*Word Wrap*) share the same line number, preserving the document's logical line count.
+### 📂 On-demand file panel (TreeView)
 
-### ✍️ Intelligent Editing & Coding Features
-* **Advanced RichEdit Engine:** Migration from the classic Edit control to RichEdit, enabling native support for **multi-level Undo** (multiple `Ctrl+Z` operations).
-* **Advanced Indentation:** A dedicated dialog for managing spacing, automatic conversion between tabs and spaces, and support for indenting/unindenting selected blocks using `Tab` / `Shift+Tab`.
+- **Project exploration:** *Open Folder* (`Ctrl+Shift+O`) creates a side panel that uses the system's native icons. The panel stays hidden until a folder is opened.
+- **Toggle:** show or hide the panel with `Ctrl+T`.
+- **Always up to date:** the contents are reloaded from disk whenever the panel is shown again or Notbad regains focus, keeping expanded folders and the selected item.
+- **Easy to read:** folders are listed first, then files, and files that are open in a tab are shown in **bold**.
 
-### 🔍 Advanced Multi-Tab Search (Modeless)
-* **Global Scope:** The new Find and Replace dialog allows for refined searches and batch replacements that scan **all open files across all tabs** simultaneously.
+### 🔢 Line number gutter
 
+- **Logical numbering:** lines wrapped by *Word Wrap* share the number of their paragraph, so the gutter always reflects the document's real line count.
+- Toggle with `Ctrl+Shift+L`.
 
-## 👥 Credits and Project Team
+### ✍️ Editing and coding features
 
-The development and evolution of Notbad are driven by:
+- **RichEdit engine:** native **multi-level undo** (several `Ctrl+Z`), per tab.
+- **Indentation:** auto-indent, configurable tab size, `Tab` / `Shift+Tab` on selected blocks and tabs ⇄ spaces conversion (*Format > Indentation...*). Each operation is a single undo step.
+- **Smart Home:** with auto-indent on, `Home` goes to the first non-blank character; pressing it again goes to the real start of the line.
 
-* 👑 **Aless (MaulSmoke)** — Project Manager, Concept & Code Review
-* 💻 **opencode** — Core C++ Development, Initial Architecture & Refactoring (v141 Toolset)
-* ⚡ **claudecode** — Development of Advanced Features, Win32 Optimization & Bug Fixing
+### 🔍 Find and Replace across tabs (modeless)
+
+- **Global scope:** search and replace in the current tab or in **all open files** at once.
+- Options: match case, whole word, search up or down.
 
 ---
-*Notbad Editor — Lightweight soul, power features.*
+
+## 💻 Requirements
+
+- Windows 10 or 11, **64-bit (x64)**.
+- No installation: `Notbad.exe` is a single portable file.
+
+Settings are stored only under `HKEY_CURRENT_USER\Software\Notbad` and are not shared with the Windows Notepad.
+
+---
+
+## 🛠️ Building
+
+- Visual Studio 2017 (platform toolset **v141**) and the Windows SDK.
+- Target: **x64** (Debug or Release).
+
+---
+
+## 👥 Credits and project team
+
+- 👑 **Aless (MaulSmoke)**: Project Manager, Concept & Code Review
+- 💻 **opencode**: Core C++ Development, Initial Architecture & Refactoring (v141 Toolset)
+- ⚡ **claudecode**: Development of Advanced Features, Win32 Optimization & Bug Fixing
+
+---
+
+*Notbad Editor: lightweight soul, power features.*

@@ -45,17 +45,16 @@ It keeps the fast, clutter-free interface (no toolbars, just the editing window,
 
 ## 💻 Requirements
 
-- Windows 10 or 11, **64-bit (x64)**.
+- Windows 7 or above, **32 64-bit**.
 - No installation: `Notbad.exe` is a single portable file.
 
-Settings are stored only under `HKEY_CURRENT_USER\Software\Notbad` and are not shared with the Windows Notepad.
+Settings are stored only under `HKEY_CURRENT_USER\Software\Notbad`.
 
 ---
 
 ## 🛠️ Building
 
 - Visual Studio 2017 (platform toolset **v141**) and the Windows SDK.
-- Target: **x64** (Debug or Release).
 
 ---
 

@@ -1,105 +1,58 @@
-CHANGELOG IN STEPS
+# CHANGELOG IN STEPS
 
-==============================================
+## v1.0.2 — Completed on 11/03/2026
 
-v1.0.2 — completed on 11/03/2026
+### FIXES
 
-  ----------------------------
+#### Editing
+* **Delete:** Explicit handling of the key, deleting the selection or the character to the right (including surrogate pairs). With auto-indentation enabled and the style set to "Spaces", at the absolute beginning of the line, Delete consumes up to the next indentation level (tabWidth spaces), limited to the existing spaces. With auto-indentation disabled or the style set to "Tabs", it deletes one character at a time. Intermediate repainting was suppressed to prevent flickering by marking the text snippet before deleting; indentation Backspace received the same treatment.
+* **Click Focus:** When reactivating an inactive window, the first click on the text positions the cursor at the clicked point. Clicking with Shift preserves the selection.
+* **Clipboard Shortcuts:** Shift+Delete cuts the selection, Shift+Insert pastes, and Ctrl+Insert copies. Previously, the Delete key handling intercepted Shift+Delete and deleted without copying, causing Shift+Insert to paste outdated content. Ctrl+Delete and Alt+Delete continue to be handled by RichEdit (delete word, etc.).
+* **Unsaved State:** In a clean file, pressing the Shift+Ctrl keys and releasing them left the file in a dirty/unsaved state.
 
-  FIXES
+#### Interface
+* **Status Bar:** Adjusted the size of the status bar components according to the window resizing.
+* **Auto-Indent Notification:** When activating auto-indent mode, the status bar displays that the mode is active.
+* **Tree File State:** Saves the state of the Tree File when closing the program.
 
-  
-  * Editing
-    - Delete: explicit treatment of the key, deleting the selection or the
-      character to the right (including surrogate pairs). With auto-indentation
-      enabled and "Spaces" style, at the actual beginning of the line, Delete consumes up to the
-      next indentation level (tabWidth spaces), limited to the existing spaces.
-      With auto-indentation disabled or "Tabs" style, it deletes one character
-      at a time. Intermediate repainting was suppressed so it does not flicker
-      marking the segment before deleting; indentation Backspace received the
-      same treatment.
-    - Click focus: when reactivating an inactive window, the first click on the
-      text positions the cursor at the clicked point. Click with Shift preserves the
-      selection.
-    - Clipboard shortcuts: Shift+Delete cuts the selection,
-      Shift+Insert pastes and Ctrl+Insert copies. Before, the treatment of the
-      Delete key intercepted Shift+Delete and deleted without copying, causing
-      Shift+Insert to paste old content. Ctrl+Delete and Alt+Delete
-      continue to be handled by RichEdit (delete word, etc.).
-    - In a clean file, when pressing the Shift+Ctrl keys and releasing them, the file became dirty.
-      
-  * Interface
-    - Adjusted the size of the status bar components according to the
-      window resizing.
-    - When activating auto-indent mode, it is displayed in the status bar that the mode is active.
-    - When closing the program, it saves the state of the Tree File.
+#### Indentation
+* **Configuration Loading:** Indentation settings (enabled/disabled, width, and style) are loaded and applied when opening the editor for the current editing session.
+* **Indent Using Group:** Added the "Indent using" group to the indentation configuration, with "Spaces" (default) and "Tabs" buttons.
+* **Enter Key:** Enter with auto-indentation copies the indentation of the previous line, already normalized to the configured style (spaces or tabs).
+* **Tab Key (No Selection):** Tab without selection inserts the configured indentation: advances to the next tab stop with spaces or inserts a tab when the style is "Tabs".
+* **Block Indentation:** Tab/Shift+Tab in blocks use the configured indentation unit.
+* **Conversion Options:** The conversion options for Tabs -> Spaces and Spaces -> Tabs were maintained.
 
-  * Indentation
-    - Indentation settings (enabled/disabled, width, and style) are
-      loaded and applied when opening the editor, in the current editing session.
-    - Added the "Indent using" group in the indentation configuration, with the
-      "Spaces" (default) and "Tabs" buttons.
-    - Enter with auto-indentation copies the indentation from the previous line already
-      normalized to the configured style (spaces or tabs).
-    - Tab without selection inserts the configured indentation: advances to the next tab
-      stop with spaces or inserts a tab when the style is "Tabs".
-    - Tab/Shift+Tab in blocks use the configured indentation unit.
-    - The conversion options Tabs -> Spaces and Spaces -> Tabs were kept.
+#### Line Numbers
+* **Vertical Scroll Tracking:** Numbering now continuously follows the vertical scroll position of the text area using a short timer while numbers are visible. This covers smooth mouse wheel scrolling, auto-scroll when typing/pasting, Enter at the end of the visible area, and Page Down, which previously left the numbering outdated because invalidation occurred before the actual displacement. The timer only repaints when the position actually changes and is terminated when numbering is hidden.
 
-  * Line numbers
-    - Numbering now continuously follows the vertical scroll position of the text
-      area with a short timer while the numbers are visible.
-      This covers the smooth scroll of the mouse wheel, auto-scroll when typing/pasting,
-      Enter at the end of the visible area, and Page Down, which previously left the numbering
-      lagging because invalidation occurred before the actual displacement. The timer
-      only repaints when the position actually changes and is terminated when hiding the numbering.
+### IMPLEMENTATIONS
 
-  -----------------------
+#### View Menu
+* **Highlight Current Line:** Added the "Highlight Current Line" option to the View menu. With this option active, the current line in the editor is highlighted with a light gray tone.
 
-  IMPLEMENTATIONS
+#### Format Menu
+* **Encoding:** Added the "Encoding" option to the Format menu, allowing the definition of the text codec in the current edit for formats such as: ANSI (Win-1252), UTF-8, UTF-8 BOM, UTF-16 LE (Unicode). When choosing the format for already edited text, it is possible to choose between: reading the text as it appears and just saving in the new format, or reloading the file with the new format. New documents or empty files now automatically use the UTF-8 standard.
 
-  * View menu:
-    - Added the "Highlight Current Line" option in the View menu;
-      with this option active, the current line in the editor is highlighted
-      with a light gray tone.
+---
 
-  * Format menu:
-    - Added the "Encoding" option in the Format menu, where we can
-      define the text codec in the current editing session for formats such as:
-      ANSI (Win-1252), UTF-8, UTF-8 BOM, UTF-16 LE (Unicode);
-      when choosing the format in a text that is already edited, it is possible to choose:
-      read the text as it appears and just save in the new format or
-      reload the file with the new format. New documents
-      or empty files now automatically use the UTF-8 standard.
+## v1.0.1 — Completed on 11/01/2026
 
+### IMPLEMENTATIONS
+* **Multi-Document Support:** Migration to multiple documents with tabs and RichEdit.
+* **Tab Management & CLI:** Save All, Close Tab, drag-and-drop into a new tab, and CLI replacing the initial one.
+* **Find/Replace:** Built-in Find/Replace with global scope and case sensitivity.
+* **TreeView:** On-demand TreeView.
+* **Line Numbering:** Implementation of line numbers.
+* **Indentation Tools:** Auto-indent, block indentation, and Tabs <-> Spaces converter.
+* **Undo History:** Multi-level Undo per tab.
+* **Documentation:** Update of About section, version, and documentation.
 
-==============================================
+---
 
-v1.0.1 — completed on 11/01/2026
+## v1.0 — Initial Base
 
-  -----------------------
-
-  IMPLEMENTATIONS
-
-    - Migration to multiple documents with tabs and RichEdit.
-    - Save All, Close Tab, drag-drop into a new tab, CLI replacing the initial one.
-    - Custom Find/Replace with global scope and case sensitive.
-    - TreeView on demand.
-    - Line numbering.
-    - Auto-indent, block indentation, and converter
-      Tabs <-> Spaces.
-    - Multi-level Undo per tab.
-    - Update of About, version, and documentation.
-
-==============================================
-
-v1.0 — initial base
-
-  -----------------------
-
-  IMPLEMENTATIONS
-
-    - Recompilation of Notepad via Ghidra.
-    - Initial version in C++ (toolset v141 / VS 2017) produced with opencode.
-    - Single document, classic Edit, menu and shortcuts, encoding, native find/replace,
-      printing, font, and settings in the registry.
+### IMPLEMENTATIONS
+* **Notepad Recompilation:** Recompilation of Notepad via Ghidra.
+* **Initial Version:** Initial version in C++ (toolset v141 / VS 2017) produced with opencode.
+* **Core Features:** Single document, classic Edit, menu and shortcuts, encoding, native find/replace, printing, font, and registry configurations.

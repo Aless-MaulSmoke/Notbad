@@ -4,18 +4,18 @@
 
 ---
 
-**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), directly inspired by the classic look and feel of Notepad. The project was born from a detailed reverse-engineering of Microsoft’s original utility using Ghidra, migrating the raw C code into modern C++.
+**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), heavily inspired by the classic and clean visual style of traditional Win32 text editors. Developed from the ground up using native APIs, it aims to recapture that nostalgia-inducing, lightning-fast text editing experience.
 
-While the original Notepad has paused in time and major modern editors (like VSCode and Notepad++) have become complex and bloated with configurations, Notbad proudly embraces pragmatism: delivering only the essential tools you actually miss, without sacrificing performance and lightweight efficiency.
+While classic editors have paused in time and modern development environments (like VSCode and Notepad++) have become complex and heavy, Notbad proudly embraces pragmatism: delivering only the essential layout and tools you actually need, without sacrificing performance, startup speed, and lightweight efficiency.
 
 ---
 
 ## 🎯 The Philosophy: Simple and OK
 
-The market is full of revolutionary editors, but they often come with cluttered interfaces and a heavy footprint that legacy PCs absolutely hate. Notbad chose the path of balance:
+The market is full of heavy, overly complex text editors. They often come with cluttered interfaces and an enormous footprint that legacy PCs absolutely hate. Notbad chose the path of balance:
 
-* **Not as empty** as the original Notepad.
-* **Not as bloated** as VSCode.
+* **Not as empty** as the bare-bones default editors.
+* **Not as bloated** as modern IDEs.
 
 It is a predictable, honest tool, free of complex setting screens and instantly ready for use—whether you need to write a quick script, review source code, or just take notes.
 
@@ -27,7 +27,7 @@ Notbad’s visual identity translates its usability philosophy through its offic
 
 * **Ready for Action:** Unlike the traditional icon of a closed notebook, Notbad displays a notepad with its cover flipped completely to the back. It is the ultimate symbol of agility: zero barriers between your click and the start of your typing.
 * **Discrete Evolution:** The inclusion of colored tabs on the side of the icon instantly communicates the ability to work with multiple documents, without breaking the classic aesthetic.
-* **The Substitution:** The presence of the stylized `N_` introduces the underscore character after the letter N, symbolizing the blinking cursor that types to replace and evolve the old standard.
+* **The Substitution:** The presence of the stylized `N_` introduces the underscore character after the letter N, symbolizing the blinking cursor that types to replace and evolve old editing standards.
 
 ---
 
@@ -47,7 +47,7 @@ The project adheres to strict rules of the classic interface (Editing Window, Me
 * **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by *Word Wrap* share the same line number, preserving the document's logical line count.
 
 ### ✍️ Intelligent Editing & Coding
-* **Advanced RichEdit Engine:** Replacing the classic Edit control with RichEdit ensures multi-level *Undo* history per tab.
+* **Advanced RichEdit Engine:** Powered by the Windows RichEdit engine, ensuring a robust, native multi-level *Undo* history per tab.
 * **Smart Indentation:** Dedicated dialog for Tab width adjustments, automatic conversion between tabs/spaces, and support for block indenting/unindenting with `Tab` / `Shift+Tab`.
 * **Line Highlight:** Option to visually highlight the current cursor line with a subtle light gray background (`Ctrl+Shift+H`).
 

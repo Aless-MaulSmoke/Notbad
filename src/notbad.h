@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.1"
+#define NOTBAD_VERSION     L"1.0.2"
 #define WM_NOTBAD_CLOSETAB (WM_APP + 1)
 #define MAX_EDIT_BUFFER     0x7FFFFFF0u
 #define MAX_FILE_PATH       32768

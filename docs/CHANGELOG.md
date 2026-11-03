@@ -1,9 +1,14 @@
 CHANGELOG IN STEPS
 
 ==============================================
+
 v1.0.2 — completed on 11/03/2026
 
-  FIXES ----------------------------
+  ----------------------------
+
+  FIXES
+
+  
   * Editing
     - Delete: explicit treatment of the key, deleting the selection or the
       character to the right (including surrogate pairs). With auto-indentation
@@ -27,7 +32,7 @@ v1.0.2 — completed on 11/03/2026
     - Adjusted the size of the status bar components according to the
       window resizing.
     - When activating auto-indent mode, it is displayed in the status bar that the mode is active.
-      - When closing the program, it saves the state of the Tree File.
+    - When closing the program, it saves the state of the Tree File.
 
   * Indentation
     - Indentation settings (enabled/disabled, width, and style) are
@@ -49,7 +54,9 @@ v1.0.2 — completed on 11/03/2026
       lagging because invalidation occurred before the actual displacement. The timer
       only repaints when the position actually changes and is terminated when hiding the numbering.
 
-  IMPLEMENTATIONS -----------------------
+  -----------------------
+
+  IMPLEMENTATIONS
 
   * View menu:
     - Added the "Highlight Current Line" option in the View menu;
@@ -67,9 +74,13 @@ v1.0.2 — completed on 11/03/2026
 
 
 ==============================================
+
 v1.0.1 — completed on 11/01/2026
 
-  IMPLEMENTATIONS -----------------------
+  -----------------------
+
+  IMPLEMENTATIONS
+
     - Migration to multiple documents with tabs and RichEdit.
     - Save All, Close Tab, drag-drop into a new tab, CLI replacing the initial one.
     - Custom Find/Replace with global scope and case sensitive.
@@ -81,9 +92,13 @@ v1.0.1 — completed on 11/01/2026
     - Update of About, version, and documentation.
 
 ==============================================
+
 v1.0 — initial base
 
-  IMPLEMENTATIONS -----------------------
+  -----------------------
+
+  IMPLEMENTATIONS
+
     - Recompilation of Notepad via Ghidra.
     - Initial version in C++ (toolset v141 / VS 2017) produced with opencode.
     - Single document, classic Edit, menu and shortcuts, encoding, native find/replace,

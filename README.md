@@ -4,9 +4,9 @@
 
 ---
 
-**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), heavily inspired by the classic and clean visual style of traditional Win32 text editors. Developed from the ground up using native APIs, it aims to recapture that nostalgia-inducing, lightning-fast text editing experience.
+**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), heavily inspired by the classic Notepad and clean visual style of traditional Win32 text editors. Developed from the ground up using native APIs, it aims to recapture that nostalgia-inducing, lightning-fast text editing experience.
 
-While classic editors have paused in time and modern development environments (like VSCode and Notepad++) have become complex and heavy, Notbad proudly embraces pragmatism: delivering only the essential layout and tools you actually need, without sacrificing performance, startup speed, and lightweight efficiency.
+While classic Notepad have paused in time and modern development environments (like VSCode and Notepad++) have become complex and heavy, Notbad proudly embraces pragmatism: delivering only the essential layout and tools you actually need, without sacrificing performance, startup speed, and lightweight efficiency.
 
 ---
 
@@ -14,8 +14,8 @@ While classic editors have paused in time and modern development environments (l
 
 The market is full of heavy, overly complex text editors. They often come with cluttered interfaces and an enormous footprint that legacy PCs absolutely hate. Notbad chose the path of balance:
 
-* **Not as empty** as the bare-bones default editors.
-* **Not as bloated** as modern IDEs.
+* **Not as empty** as Notepad.
+* **Not as bloated** as VSCode.
 
 It is a predictable, honest tool, free of complex setting screens and instantly ready for use—whether you need to write a quick script, review source code, or just take notes.
 
@@ -44,12 +44,13 @@ The project adheres to strict rules of the classic interface (Editing Window, Me
 * **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) creates a side panel with a file tree view on demand, using the system's native icons. Toggle the panel quickly with `Ctrl+T`.
 
 ### 🔢 Dynamic Line Numbers (Gutter)
-* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by *Word Wrap* share the same line number, preserving the document's logical line count.
+* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks.
 
 ### ✍️ Intelligent Editing & Coding
 * **Advanced RichEdit Engine:** Powered by the Windows RichEdit engine, ensuring a robust, native multi-level *Undo* history per tab.
 * **Smart Indentation:** Dedicated dialog for Tab width adjustments, automatic conversion between tabs/spaces, and support for block indenting/unindenting with `Tab` / `Shift+Tab`.
 * **Line Highlight:** Option to visually highlight the current cursor line with a subtle light gray background (`Ctrl+Shift+H`).
+* **Code highlighting:** An option to visually highlight elements of source code. It uses a minimalist, universal approach applicable to all code (`Ctrl+Shift+K`).
 
 ### 🔍 Advanced Modeless Search
 * **Global Scope:** A custom Find/Replace dialog that allows for refined searches and batch replacements scanning **all open files** simultaneously.

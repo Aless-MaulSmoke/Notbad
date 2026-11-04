@@ -65,6 +65,7 @@ void SettingsLoadDefaults(void)
     g_settings.pasteOriginalEol     = FALSE;
     g_settings.showLineNumbers      = FALSE;
     g_settings.highlightCurrentLine = FALSE;
+    g_settings.codeHighlighting     = FALSE;
     g_settings.autoIndent           = FALSE;
     g_settings.indentWithTabs       = FALSE;
     g_settings.tabWidth             = 4;
@@ -125,6 +126,9 @@ void SettingsLoad(void)
 
     ReadDword(hKey, L"HighlightCurrentLine", &value, 0);
     g_settings.highlightCurrentLine = value != 0;
+
+    ReadDword(hKey, L"CodeHighlighting", &value, 0);
+    g_settings.codeHighlighting = value != 0;
 
     ReadDword(hKey, L"AutoIndent", &value, 0);
     g_settings.autoIndent = value != 0;
@@ -312,6 +316,7 @@ void SettingsSave(void)
     WriteDword(hKey, L"fPasteOriginalEOL", g_settings.pasteOriginalEol ? 1 : 0);
     WriteDword(hKey, L"ShowLineNumbers", g_settings.showLineNumbers ? 1 : 0);
     WriteDword(hKey, L"HighlightCurrentLine", g_settings.highlightCurrentLine ? 1 : 0);
+    WriteDword(hKey, L"CodeHighlighting", g_settings.codeHighlighting ? 1 : 0);
     WriteDword(hKey, L"AutoIndent", g_settings.autoIndent ? 1 : 0);
     WriteDword(hKey, L"IndentWithTabs", g_settings.indentWithTabs ? 1 : 0);
     WriteDword(hKey, L"TabWidth", (DWORD)g_settings.tabWidth);

@@ -18,10 +18,21 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.2"
+#define NOTBAD_VERSION     L"1.0.3"
 #define WM_NOTBAD_CLOSETAB (WM_APP + 1)
+#define NOTBAD_CODE_HIGHLIGHT_TIMER 0x4C48
 #define MAX_EDIT_BUFFER     0x7FFFFFF0u
 #define MAX_FILE_PATH       32768
+
+// ---- Cores do editor -------------------------------------------------------
+// Todas as cores do editor ficam aqui.
+//
+// Texto
+#define NOTBAD_TEXT_COLOR            RGB(64, 64, 64)  // texto do documento (cinza medio)
+#define NOTBAD_ACTIVE_TEXT_COLOR     RGB(0, 0, 0)        // texto na selecao e na linha em destaque
+// Fundos
+#define NOTBAD_HIGHLIGHT_COLOR       RGB(240, 240, 240)  // fundo da linha em destaque
+#define NOTBAD_SELECTION_BACK_COLOR  GetSysColor(COLOR_HIGHLIGHT) // fundo do texto marcado (cor de selecao do sistema; troque por RGB(...) para fixar)
 
 enum TextEncoding
 {
@@ -46,6 +57,7 @@ struct AppSettings
     BOOL     pasteOriginalEol;
     BOOL     showLineNumbers;
     BOOL     highlightCurrentLine;
+    BOOL     codeHighlighting;
     BOOL     autoIndent;
     BOOL     indentWithTabs;
     int      defaultEncoding;
@@ -65,8 +77,25 @@ struct Document
     TextEncoding encoding;
     int          untitledNum;   // 1 = "Untitled", 2 = "Untitled 2", ...
     ITextRange*  pHighlightRange;
+    ITextRange*  pSelectionRange; // trecho selecionado com NOTBAD_ACTIVE_TEXT_COLOR
+    int          fgPrevSelLen;    // tamanho da selecao na ultima atualizacao de cor
+    int          fgPrevTextLen;   // tamanho do texto na ultima atualizacao (-1 = desconhecido)
     BOOL         bReinterpreted; // encoding trocado por "reinterpretar"; limpo ao salvar/abrir
     BOOL         bOverwrite;     // modo Overwrite (tecla Insert), por documento
+    int          codeHighlightNext;    // proximo offset a processar pelo lazy highlighting
+    BOOL         bCodeHighlightDone;   // varredura lazy concluida
+    BOOL         bCodeHighlightCleared; // negrito antigo do arquivo ja removido nesta passada
+    int          codeHighlightParaStart; // inicio do ultimo trecho realcado na linha atual
+    int          codeHighlightParaEnd;   // fim do ultimo trecho realcado na linha atual
+    BOOL         bCodeHighlightParaValid; // o trecho acima ainda reflete o texto atual
+    BOOL         bCodeHighlightTextDirty; // houve edicao desde o ultimo realce da linha atual
+    int          indentBlockFirst;     // primeiro paragrafo (1-based) do bloco de indentacao atual
+    int          indentBlockLast;      // ultimo paragrafo (1-based) do bloco de indentacao atual
+    int          indentBlockBase;      // indentacao (colunas) que define o bloco
+    int          indentBlockParaCount; // numero de paragrafos usado no calculo do bloco
+    int          indentBlockKind;      // 0 = regiao comum, 1 = bloco aberto, 2 = bloco fechado
+    int          indentBlockAnchorPara; // paragrafo da linha inicial/final do bloco
+    BOOL         bIndentBlockValid;    // o bloco acima ainda reflete o cursor/texto atuais
 };
 
 extern HINSTANCE    g_hInstance;
@@ -155,15 +184,26 @@ void EditorConvertTabs(BOOL bTabsToSpaces);
 void EditorApplyTabWidth(void);
 void EditorApplyTabWidthTo(HWND hEdit);
 void EditorApplyIndentation(void);
+void EditorApplyTextColorTo(HWND hEdit);
 void EditorApplyCurrentLineHighlight(void);
 void EditorUpdateCurrentLineHighlight(HWND hEdit);
+void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen);
 void EditorClearCurrentLineHighlight(Document* pDoc);
 void EditorUpdateCaretShape(HWND hEdit);
 void EditorResetCaretShape(void);
 void EditorHandleOverwriteChar(HWND hEdit, WCHAR ch);
+BOOL EditorTryOverwriteChar(HWND hEdit, WCHAR ch);
 void EditorPlaceCaretAtClick(HWND hEdit);
 void EditorPlaceCaretAtPoint(HWND hEdit, POINT pt);
 BOOL EditorHandleKeyDown(HWND hEdit, WPARAM wParam);
+void EditorClearUniversalHighlight(HWND hEdit);
+void EditorScheduleUniversalHighlight(Document* pDoc);
+void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear);
+void EditorInvalidateUniversalHighlight(Document* pDoc);
+void EditorCancelUniversalHighlight(void);
+void EditorCancelUniversalHighlightFor(Document* pDoc);
+BOOL EditorProcessUniversalHighlightChunk(void);
+
 
 // settings.cpp
 void SettingsLoad(void);

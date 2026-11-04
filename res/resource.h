@@ -87,6 +87,7 @@
 #define IDM_LINENUMBERS             0x1034
 #define IDM_INDENT                  0x1035
 #define IDM_HIGHLIGHTLINE           0x1036
+#define IDM_HIGHLIGHTCODE           0x1037
 #define IDM_HELP                    0x1040
 #define IDM_ABOUT                   0x1041
 

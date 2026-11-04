@@ -75,6 +75,34 @@ static int GetLineNumberWidth(void)
 #define LINE_NUMBER_SCROLL_POLL_MS 30
 
 static int g_lineNumberScrollY = 0;
+static HFONT g_hFontBlock = NULL;
+
+static void ResetLineNumberBlockFont(void)
+{
+    if (g_hFontBlock != NULL)
+    {
+        DeleteObject(g_hFontBlock);
+        g_hFontBlock = NULL;
+    }
+}
+
+static HFONT EnsureLineNumberBlockFont(void)
+{
+    LOGFONTW lf = {};
+
+    if (g_hFontBlock != NULL)
+        return g_hFontBlock;
+
+    if (g_hFont == NULL)
+        return NULL;
+
+    if (GetObjectW(g_hFont, sizeof(lf), &lf) != sizeof(lf))
+        return NULL;
+
+    lf.lfWeight = FW_BOLD;
+    g_hFontBlock = CreateFontIndirectW(&lf);
+    return g_hFontBlock;
+}
 
 // O RichEdit faz scroll suave (roda do mouse, auto-scroll ao digitar, Page
 // Down etc.): a posicao so muda algum tempo depois do evento. Um timer curto
@@ -137,16 +165,23 @@ static BOOL GetTreeSplitterRect(RECT* prc)
 
 // Move/redimensiona um filho dentro de um lote. Se o lote nao existe (ou
 // falhou), cai para SetWindowPos direto.
+//
+// SWP_NOCOPYBITS: sem isso o Windows copia a imagem antiga do cliente para a
+// nova posicao e so invalida a parte nova. No RichEdit (que refaz a quebra de
+// linha ao mudar de largura) e no gutter isso deixava "fantasmas" do conteudo
+// anterior durante o arrasto do splitter da TreeView; com a flag cada filho
+// invalida e repinta o cliente inteiro, uma vez por movimento.
 static HDWP DeferMove(HDWP hdwp, HWND hWnd, int x, int y, int cx, int cy)
 {
+    const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS;
+
     if (hdwp == NULL)
     {
-        SetWindowPos(hWnd, NULL, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(hWnd, NULL, x, y, cx, cy, flags);
         return NULL;
     }
 
-    return DeferWindowPos(hdwp, hWnd, NULL, x, y, cx, cy,
-                          SWP_NOZORDER | SWP_NOACTIVATE);
+    return DeferWindowPos(hdwp, hWnd, NULL, x, y, cx, cy, flags);
 }
 
 // Barra de status: Ln/Col | auto-indent | codificacao | porcentagem.
@@ -282,6 +317,14 @@ static void LayoutChildren(HWND hWnd)
 
     if (hdwp != NULL)
         EndDeferWindowPos(hdwp);
+
+    // Durante o arrasto do splitter, pinta TreeView, gutter e editor no mesmo
+    // instante (em vez de cada um no seu proprio WM_PAINT, em momentos
+    // diferentes), para um nao ficar atras do outro e parecer piscar.
+    if (g_bTreeDrag)
+    {
+        RedrawWindow(hWnd, NULL, NULL, RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
 }
 
 void LayoutMainWindow(void)
@@ -761,8 +804,10 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
         if (g_hWndEdit != NULL)
         {
-            HGDIOBJ oldFont = SelectObject(hdcMem, g_hFont != NULL ? (HGDIOBJ)g_hFont
-                                                                  : GetStockObject(SYSTEM_FIXED_FONT));
+            HGDIOBJ hNormalFont = g_hFont != NULL ? (HGDIOBJ)g_hFont
+                                                  : GetStockObject(SYSTEM_FIXED_FONT);
+            HFONT hBlockFont = EnsureLineNumberBlockFont();
+            HGDIOBJ oldFont = SelectObject(hdcMem, hNormalFont);
             TEXTMETRICW tm;
             RECT rcEdit;
             int lineHeight;
@@ -771,6 +816,8 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
             int start;
             int line;
             int logical = 0;
+            int zoomNum = 0;
+            int zoomDen = 0;
 
             SetBkMode(hdcMem, TRANSPARENT);
             SetTextColor(hdcMem, GetSysColor(COLOR_GRAYTEXT));
@@ -781,6 +828,16 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
                 lineHeight = 16;
 
             SendMessageW(g_hWndEdit, EM_GETRECT, 0, (LPARAM)&rcEdit);
+
+            // Zoom do conteudo: a altura de cada linha do texto acompanha o zoom,
+            // mas a fonte do gutter nao. A altura real da linha e usada abaixo
+            // para centralizar o numero verticalmente.
+            SendMessageW(g_hWndEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
+            if (zoomNum <= 0 || zoomDen <= 0)
+            {
+                zoomNum = 1;
+                zoomDen = 1;
+            }
 
             // RichEdit: lParam de EM_CHARFROMPOS e um ponteiro para POINTL
             // (MAKELPARAM, como no Edit, vira ponteiro invalido e causa AV).
@@ -802,13 +859,69 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
             lineCount = (int)SendMessageW(g_hWndEdit, EM_GETLINECOUNT, 0, 0);
             start = firstLine > 1 ? firstLine - 1 : 0;
 
+            // O numero de cada linha logica fica centralizado verticalmente no
+            // bloco inteiro dela (todas as linhas visuais do word wrap), nao so
+            // na primeira. Cada numero e pintado quando o bloco termina, ou seja,
+            // ao chegar ao inicio da proxima linha logica (ou ao fim da area).
+            // Se parte do bloco esta fora da tela, centraliza na parte visivel
+            // para o numero nao sumir enquanto a linha esta na tela.
+            int pendingLogical = 0;
+            int pendingTop = 0;
+            int endBottom = 0;
+            const int fallbackRow = MulDiv(lineHeight, zoomNum, zoomDen);
+
+            auto flushNumber = [&](int blockBottom)
+            {
+                WCHAR szNumber[32];
+                RECT rcNumber;
+                int top = pendingTop;
+                int bottom = blockBottom;
+
+                if (pendingLogical <= 0)
+                    return;
+
+                if (bottom > 0 && top < rc.bottom)
+                {
+                    if (top < 0)
+                        top = 0;
+                    if (bottom > rc.bottom)
+                        bottom = rc.bottom;
+
+                    StringCchPrintfW(szNumber, ARRAYSIZE(szNumber), L"%d", pendingLogical);
+                    rcNumber.left = rc.left;
+                    rcNumber.top = top;
+                    rcNumber.right = rc.right - 5;
+                    rcNumber.bottom = bottom;
+
+                    if (g_settings.autoIndent &&
+                        g_pActiveDoc != NULL &&
+                        g_pActiveDoc->hEdit == g_hWndEdit &&
+                        g_pActiveDoc->bIndentBlockValid &&
+                        pendingLogical >= g_pActiveDoc->indentBlockFirst &&
+                        pendingLogical <= g_pActiveDoc->indentBlockLast)
+                    {
+                        if (hBlockFont != NULL)
+                            SelectObject(hdcMem, hBlockFont);
+                        SetTextColor(hdcMem, GetSysColor(COLOR_WINDOWTEXT));
+                    }
+                    else
+                    {
+                        SelectObject(hdcMem, hNormalFont);
+                        SetTextColor(hdcMem, GetSysColor(COLOR_GRAYTEXT));
+                    }
+
+                    DrawTextW(hdcMem, szNumber, -1, &rcNumber,
+                              DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                }
+
+                pendingLogical = 0;
+            };
+
             for (line = start; line < lineCount; ++line)
             {
                 int index = (int)SendMessageW(g_hWndEdit, EM_LINEINDEX, line, 0);
                 int y;
                 BOOL isContinuation = FALSE;
-                WCHAR szNumber[32];
-                RECT rcNumber;
 
                 if (index < 0)
                     break;
@@ -847,18 +960,29 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
                 y = (int)ptLine.y + (int)origin.y;
                 if (y > rc.bottom)
+                {
+                    endBottom = y;
                     break;
-                if (y + lineHeight < 0 || isContinuation)
-                    continue;
+                }
+                endBottom = y + fallbackRow;
 
-                StringCchPrintfW(szNumber, ARRAYSIZE(szNumber), L"%d", logical);
-                rcNumber.left = rc.left;
-                rcNumber.top = y;
-                rcNumber.right = rc.right - 5;
-                rcNumber.bottom = y + lineHeight;
-                DrawTextW(hdcMem, szNumber, -1, &rcNumber,
-                          DT_RIGHT | DT_SINGLELINE | DT_TOP | DT_NOPREFIX);
+                if (!isContinuation)
+                {
+                    // Inicio de uma nova linha logica: fecha o bloco anterior.
+                    flushNumber(y);
+                    pendingLogical = logical;
+                    pendingTop = y;
+                }
+                else if (line == start)
+                {
+                    // Primeira linha visual da area e continuacao de uma linha
+                    // logica que comecou acima: o bloco visivel comeca aqui.
+                    pendingLogical = logical;
+                    pendingTop = y;
+                }
             }
+
+            flushNumber(endBottom);
 
             SelectObject(hdcMem, oldFont);
         }
@@ -900,6 +1024,7 @@ LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
         break;
 
     case WM_SETFONT:
+        ResetLineNumberBlockFont();
         InvalidateRect(hWnd, NULL, TRUE);
         return 0;
 
@@ -975,6 +1100,26 @@ static void ToggleLineNumbers(void)
 static void ToggleCurrentLineHighlight(void)
 {
     g_settings.highlightCurrentLine = !g_settings.highlightCurrentLine;
+    EditorApplyCurrentLineHighlight();
+    UpdateEditMenuState(g_hWndMain);
+    SettingsSave();
+}
+
+static void ToggleCodeHighlighting(void)
+{
+    size_t i;
+
+    g_settings.codeHighlighting = !g_settings.codeHighlighting;
+
+    if (!g_settings.codeHighlighting)
+        EditorCancelUniversalHighlight();
+
+    for (i = 0; i < g_documents.size(); ++i)
+        EditorRestartUniversalHighlight(g_documents[i], TRUE);
+
+    if (g_settings.codeHighlighting && g_pActiveDoc != NULL)
+        EditorScheduleUniversalHighlight(g_pActiveDoc);
+
     EditorApplyCurrentLineHighlight();
     UpdateEditMenuState(g_hWndMain);
     SettingsSave();
@@ -1071,6 +1216,14 @@ static BOOL CreateFileTree(HWND hWnd)
 
     SendMessageW(g_hWndTree, WM_SETFONT,
                  (WPARAM)(g_hFontMenu != NULL ? g_hFontMenu : g_hFontStatus), TRUE);
+
+    // Double buffering da TreeView: sem ele ela apaga o fundo e pinta os itens
+    // em seguida a cada redimensionamento, o que pisca no arrasto do splitter.
+#ifndef TVS_EX_DOUBLEBUFFER
+#define TVS_EX_DOUBLEBUFFER 0x0004
+#endif
+    SendMessageW(g_hWndTree, TVM_SETEXTENDEDSTYLE,
+                 TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
 
     HIMAGELIST himl = GetShellImageList();
     if (himl != NULL)
@@ -1734,6 +1887,8 @@ void UpdateEditMenuState(HWND hWnd)
                   MF_BYCOMMAND | (g_settings.showLineNumbers ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(hMenu, IDM_HIGHLIGHTLINE,
                   MF_BYCOMMAND | (g_settings.highlightCurrentLine ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(hMenu, IDM_HIGHLIGHTCODE,
+                  MF_BYCOMMAND | (g_settings.codeHighlighting ? MF_CHECKED : MF_UNCHECKED));
 
     // Format > Encoding: marca a codificacao do documento ativo. Se ela for
     // uma das que o menu nao oferece (UTF-16 BE, OEM...), nenhum item fica marcado.
@@ -1772,12 +1927,108 @@ static void ToggleStatusBar(void)
     SettingsSave();
 }
 
+// ---------------------------------------------------------------------------
+// Caret do modo Overwrite. O RichEdit recria o proprio caret ao rolar (barra,
+// roda) e ao mudar o zoom sem avisar por notificacao, e o bloco voltava a ser
+// a barra fina mesmo com o documento ainda em Overwrite. Um timer curto compara
+// posicao de scroll e zoom e reaplica a forma do caret quando algo muda.
+// ---------------------------------------------------------------------------
+#define CARET_SHAPE_TIMER      0x4E43
+#define CARET_SHAPE_POLL_MS    40
+
+static HWND  s_hCaretWatchEdit = NULL;
+static POINT s_caretWatchScroll = { -1, -1 };
+static int   s_caretWatchZoomNum = -1;
+static int   s_caretWatchZoomDen = -1;
+static int   s_caretWatchSelStart = -1;
+static int   s_caretWatchSelEnd = -1;
+
+// Mensagem postada pelo EN_SELCHANGE: o RichEdit recria o proprio caret DEPOIS de
+// notificar a mudanca de selecao (clique do mouse, setas), entao a forma do
+// Overwrite precisa ser reaplicada quando o tratamento dele ja terminou.
+static UINT GetReapplyCaretMessage(void)
+{
+    static UINT s_msg = 0;
+
+    if (s_msg == 0)
+        s_msg = RegisterWindowMessageW(L"Notbad.ReapplyCaret");
+    return s_msg;
+}
+
+static void CheckOverwriteCaretShape(void)
+{
+    Document* pDoc;
+    POINT scroll = { 0, 0 };
+    int zoomNum = 0;
+    int zoomDen = 0;
+    int selStart = 0;
+    int selEnd = 0;
+
+    if (g_hWndEdit == NULL || !IsWindow(g_hWndEdit) || GetFocus() != g_hWndEdit)
+    {
+        s_hCaretWatchEdit = NULL;
+        return;
+    }
+
+    pDoc = DocFromEdit(g_hWndEdit);
+    if (pDoc == NULL || !pDoc->bOverwrite)
+    {
+        s_hCaretWatchEdit = NULL;
+        return;
+    }
+
+    SendMessageW(g_hWndEdit, EM_GETSCROLLPOS, 0, (LPARAM)&scroll);
+    SendMessageW(g_hWndEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
+    SendMessageW(g_hWndEdit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+
+    if (s_hCaretWatchEdit == g_hWndEdit &&
+        scroll.x == s_caretWatchScroll.x && scroll.y == s_caretWatchScroll.y &&
+        zoomNum == s_caretWatchZoomNum && zoomDen == s_caretWatchZoomDen &&
+        selStart == s_caretWatchSelStart && selEnd == s_caretWatchSelEnd)
+    {
+        return;
+    }
+
+    s_hCaretWatchEdit = g_hWndEdit;
+    s_caretWatchScroll = scroll;
+    s_caretWatchZoomNum = zoomNum;
+    s_caretWatchZoomDen = zoomDen;
+    s_caretWatchSelStart = selStart;
+    s_caretWatchSelEnd = selEnd;
+
+    EditorUpdateCaretShape(g_hWndEdit);
+}
+
 LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if (msg == GetReapplyCaretMessage())
+    {
+        HWND hEdit = (HWND)lParam;
+
+        if (hEdit != NULL && IsWindow(hEdit))
+            EditorUpdateCaretShape(hEdit);
+        return 0;
+    }
+
     switch (msg)
     {
+    case WM_TIMER:
+        if (wParam == CARET_SHAPE_TIMER)
+        {
+            CheckOverwriteCaretShape();
+            return 0;
+        }
+        if (wParam == NOTBAD_CODE_HIGHLIGHT_TIMER)
+        {
+            if (!EditorProcessUniversalHighlightChunk())
+                KillTimer(hWnd, NOTBAD_CODE_HIGHLIGHT_TIMER);
+            return 0;
+        }
+        break;
+
     case WM_CREATE:
         g_hWndMain = hWnd;
+        SetTimer(hWnd, CARET_SHAPE_TIMER, CARET_SHAPE_POLL_MS, NULL);
         CreateStatusBar(hWnd);
         CreateTabControl(hWnd);
         CreateLineNumbers(hWnd);
@@ -1959,6 +2210,13 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         {
             EditorUpdateCurrentLineHighlight(hdr->hwndFrom);
             EditorUpdateCaretShape(hdr->hwndFrom);
+            {
+                Document* pSelDoc = DocFromEdit(hdr->hwndFrom);
+
+                // Reaplica de novo depois que o RichEdit terminar de tratar o clique.
+                if (pSelDoc != NULL && pSelDoc->bOverwrite)
+                    PostMessageW(hWnd, GetReapplyCaretMessage(), 0, (LPARAM)hdr->hwndFrom);
+            }
             UpdateStatusBar();
             UpdateEditMenuState(hWnd);
             return 0;
@@ -1983,6 +2241,7 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                     UpdateWindowTitle();
                     UpdateStatusBar();
                     InvalidateLineNumbersOnEdit(hCtl);
+                    EditorInvalidateUniversalHighlight(pCtlDoc);
                     EditorUpdateCurrentLineHighlight(hCtl);
                     EditorUpdateCaretShape(hCtl);
                 }
@@ -2039,6 +2298,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         case IDM_HIGHLIGHTLINE:
             ToggleCurrentLineHighlight();
+            return 0;
+
+        case IDM_HIGHLIGHTCODE:
+            ToggleCodeHighlighting();
             return 0;
 
         case IDM_SAVE:
@@ -2248,10 +2511,13 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hWnd, CARET_SHAPE_TIMER);
+        KillTimer(hWnd, NOTBAD_CODE_HIGHLIGHT_TIMER);
         SaveFileTreeState();
         ClearFileTree();
         g_hWndTree = NULL;
         g_hWndLineNumbers = NULL;
+        ResetLineNumberBlockFont();
         DocDestroyAll();
         SettingsSaveWindowPlacement(hWnd);
         SettingsSave();

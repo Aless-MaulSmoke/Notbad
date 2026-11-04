@@ -81,7 +81,13 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
 
     // Modo Overwrite: o caractere digitado substitui o que esta sob o cursor.
     if (msg == WM_CHAR && pDoc != NULL && pDoc->bOverwrite)
+    {
+        // Caminho normal: troca em uma operacao e descarta o WM_CHAR.
+        if (EditorTryOverwriteChar(hWnd, (WCHAR)wParam))
+            return 0;
+
         EditorHandleOverwriteChar(hWnd, (WCHAR)wParam);
+    }
 
     // O RichEdit recria o caret no foco e na troca de fonte; o formato de
     // bloco do Overwrite precisa ser reaplicado depois disso.
@@ -98,6 +104,10 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
         if ((GetKeyState(VK_SHIFT) & 0x8000) == 0)
             EditorPlaceCaretAtPoint(hWnd, pt);
 
+        // O RichEdit acabou de recriar o caret no ponto clicado: reaplica o
+        // bloco do Overwrite.
+        EditorUpdateCaretShape(hWnd);
+
         return result;
     }
 
@@ -113,7 +123,11 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
     }
 
     if (msg == WM_SETFONT)
+    {
+        // O WM_SETFONT mexe no formato padrao: reaplica a cor do texto.
+        EditorApplyTextColorTo(hWnd);
         EditorUpdateCaretShape(hWnd);
+    }
 
     if (msg == WM_KEYUP || msg == WM_LBUTTONUP)
     {
@@ -126,6 +140,10 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
 
     if (msg == WM_VSCROLL || msg == WM_MOUSEWHEEL)
         InvalidateLineNumbers();
+
+    // Rolagem e zoom fazem o RichEdit recriar o caret.
+    if (msg == WM_VSCROLL || msg == WM_HSCROLL || msg == WM_MOUSEWHEEL)
+        EditorUpdateCaretShape(hWnd);
 
     return result;
 }
@@ -154,6 +172,7 @@ static HWND CreateRichEdit(Document* pDoc)
     if (g_hFont != NULL)
         SendMessageW(hEdit, WM_SETFONT, (WPARAM)g_hFont, TRUE);
 
+    EditorApplyTextColorTo(hEdit);
     EditorApplyTabWidthTo(hEdit);
 
     return hEdit;
@@ -316,6 +335,9 @@ void DocActivate(Document* pDoc)
     UpdateEditMenuState(g_hWndMain);
     SetFocus(pDoc->hEdit);
     EditorUpdateCurrentLineHighlight(pDoc->hEdit);
+
+    // Retoma (ou inicia) a varredura lazy do realce global ao mudar de aba.
+    EditorScheduleUniversalHighlight(pDoc);
 }
 
 Document* DocCreate(void)
@@ -396,6 +418,7 @@ void DocDestroy(Document* pDoc)
         g_hWndEdit = NULL;
     }
 
+    EditorCancelUniversalHighlightFor(pDoc);
     EditorClearCurrentLineHighlight(pDoc);
     DestroyWindow(pDoc->hEdit);
     delete pDoc;
@@ -510,6 +533,9 @@ BOOL DocLoad(Document* pDoc, LPCWSTR lpFileName)
         UpdateWindowTitle();
         UpdateStatusBar();
         UpdateEditMenuState(g_hWndMain);
+
+        // Reinicia a varredura lazy para o texto recem-carregado.
+        EditorRestartUniversalHighlight(pDoc, TRUE);
     }
 
     return TRUE;

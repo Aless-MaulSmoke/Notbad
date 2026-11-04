@@ -6,8 +6,6 @@
 #include <richole.h>
 #include <tom.h>
 
-#define NOTBAD_HIGHLIGHT_COLOR RGB(240, 240, 240)
-
 static BOOL s_bUpdatingHighlight = FALSE;
 
 static void GetEditSelection(HWND hEdit, int* pStart, int* pEnd)
@@ -255,7 +253,14 @@ void EditorApplyTabWidth(void)
 // apos o dialogo de indentacao.
 void EditorApplyIndentation(void)
 {
+    size_t i;
+
     EditorApplyTabWidth();
+
+    for (i = 0; i < g_documents.size(); ++i)
+        g_documents[i]->bIndentBlockValid = FALSE;
+
+    EditorUpdateCurrentLineHighlight(g_hWndEdit);
     InvalidateLineNumbers();
     UpdateStatusBar();
 }
@@ -372,6 +377,335 @@ int EditorGetParagraphStartByNumber(HWND hEdit, int lineNumber)
     }
 
     return (int)start;
+}
+
+static int EditorIndentColumnsAt(HWND hEdit, int start, int textLen, BOOL* pbBlank)
+{
+    TEXTRANGEW tr = {};
+    WCHAR szBuf[1024];
+    int tabWidth = g_settings.tabWidth > 0 ? g_settings.tabWidth : 4;
+    int got;
+    int col = 0;
+    int i;
+
+    if (pbBlank != NULL)
+        *pbBlank = TRUE;
+
+    if (hEdit == NULL || start < 0 || start >= textLen)
+        return 0;
+
+    tr.chrg.cpMin = start;
+    tr.chrg.cpMax = start + (LONG)(ARRAYSIZE(szBuf) - 1);
+    if (tr.chrg.cpMax > textLen)
+        tr.chrg.cpMax = textLen;
+    tr.lpstrText = szBuf;
+
+    got = (int)SendMessageW(hEdit, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    if (got <= 0)
+        return 0;
+
+    for (i = 0; i < got; ++i)
+    {
+        WCHAR ch = szBuf[i];
+
+        if (ch == L' ')
+            ++col;
+        else if (ch == L'\t')
+            col = (col / tabWidth + 1) * tabWidth;
+        else
+            break;
+    }
+
+    if (pbBlank != NULL)
+        *pbBlank = (i >= got) || (szBuf[i] == L'\r' || szBuf[i] == L'\n');
+
+    return col;
+}
+
+void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen)
+{
+    Document* pDoc;
+    IRichEditOle* pOle = NULL;
+    ITextDocument* pTextDoc = NULL;
+    ITextRange* pIter = NULL;
+    ITextRange* pProbe = NULL;
+    long para = 0;
+    long anchorPara;
+    long firstPara;
+    long lastPara;
+    long paraCount;
+    long start = 0;
+    long anchorStart = 0;
+    long lineStart = 0;
+    long moved = 0;
+    int base;
+    int indent;
+    int guard;
+    int kind = 0;
+    BOOL blank = FALSE;
+    BOOL caretBlank;
+    BOOL found = FALSE;
+    BOOL isHeader = FALSE;
+    BOOL isCloser = FALSE;
+    BOOL noBlock = FALSE;
+
+    pDoc = DocFromEdit(hEdit);
+    if (pDoc == NULL || hEdit == NULL || textLen < 0 || !g_settings.autoIndent)
+        return;
+
+    if (SendMessageW(hEdit, EM_GETOLEINTERFACE, 0, (LPARAM)&pOle) == 0 || pOle == NULL)
+        return;
+    if (FAILED(pOle->QueryInterface(__uuidof(ITextDocument), (void**)&pTextDoc)) ||
+        pTextDoc == NULL)
+    {
+        pOle->Release();
+        return;
+    }
+    pOle->Release();
+
+    if (FAILED(pTextDoc->Range(caret, caret, &pIter)) || pIter == NULL)
+    {
+        pTextDoc->Release();
+        return;
+    }
+
+    pIter->GetIndex(tomParagraph, &para);
+    pIter->StartOf(tomParagraph, 0, &moved);
+    pIter->GetStart(&start);
+
+    base = EditorIndentColumnsAt(hEdit, (int)start, textLen, &blank);
+    caretBlank = blank;
+    anchorPara = para;
+    anchorStart = start;
+
+    if (blank && base == 0)
+    {
+        if (SUCCEEDED(pTextDoc->Range(start, start, &pProbe)) && pProbe != NULL)
+        {
+            guard = 0;
+            while (guard++ < 256)
+            {
+                moved = 0;
+                if (FAILED(pProbe->Move(tomParagraph, -1, &moved)) || moved == 0)
+                    break;
+                pProbe->GetStart(&lineStart);
+                indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+                if (!blank)
+                {
+                    pProbe->GetIndex(tomParagraph, &anchorPara);
+                    anchorStart = lineStart;
+                    base = indent;
+                    found = TRUE;
+                    break;
+                }
+            }
+            pProbe->Release();
+            pProbe = NULL;
+        }
+
+        if (!found)
+        {
+            if (SUCCEEDED(pTextDoc->Range(start, start, &pProbe)) && pProbe != NULL)
+            {
+                guard = 0;
+                while (guard++ < 256)
+                {
+                    moved = 0;
+                    if (FAILED(pProbe->Move(tomParagraph, 1, &moved)) || moved == 0)
+                        break;
+                    pProbe->GetStart(&lineStart);
+                    indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+                    if (!blank)
+                    {
+                        pProbe->GetIndex(tomParagraph, &anchorPara);
+                        anchorStart = lineStart;
+                        base = indent;
+                        found = TRUE;
+                        break;
+                    }
+                }
+                pProbe->Release();
+                pProbe = NULL;
+            }
+        }
+
+        if (!found)
+            base = 0;
+    }
+
+    paraCount = EditorGetParagraphCount(hEdit);
+
+    pIter->SetRange(anchorStart, anchorStart);
+    guard = 0;
+    while (guard++ < 4096)
+    {
+        moved = 0;
+        if (FAILED(pIter->Move(tomParagraph, 1, &moved)) || moved == 0)
+            break;
+        pIter->GetStart(&lineStart);
+        indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+        if (blank)
+            continue;
+        isHeader = (indent > base);
+        break;
+    }
+
+    if (!isHeader)
+    {
+        pIter->SetRange(anchorStart, anchorStart);
+        guard = 0;
+        while (guard++ < 4096)
+        {
+            moved = 0;
+            if (FAILED(pIter->Move(tomParagraph, -1, &moved)) || moved == 0)
+                break;
+            pIter->GetStart(&lineStart);
+            indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+            if (blank)
+                continue;
+            isCloser = (indent > base);
+            break;
+        }
+    }
+
+    if (isHeader)
+        kind = 1;
+    else if (isCloser)
+        kind = 2;
+
+    if (pDoc->bIndentBlockValid &&
+        pDoc->indentBlockParaCount == (int)paraCount &&
+        pDoc->indentBlockBase == base &&
+        pDoc->indentBlockKind == kind &&
+        (pDoc->indentBlockFirst == 0 ||
+         (para >= pDoc->indentBlockFirst && para <= pDoc->indentBlockLast)) &&
+        (kind == 0 || pDoc->indentBlockAnchorPara == (int)anchorPara))
+    {
+        pIter->Release();
+        pTextDoc->Release();
+        return;
+    }
+
+    firstPara = anchorPara;
+    lastPara = anchorPara;
+
+    if (kind == 1)
+    {
+        lastPara = paraCount;
+
+        pIter->SetRange(anchorStart, anchorStart);
+        guard = 0;
+        while (guard++ < 4096)
+        {
+            moved = 0;
+            if (FAILED(pIter->Move(tomParagraph, 1, &moved)) || moved == 0)
+                break;
+            pIter->GetStart(&lineStart);
+            indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+            if (blank)
+                continue;
+            if (indent <= base)
+            {
+                pIter->GetIndex(tomParagraph, &lastPara);
+                break;
+            }
+        }
+    }
+    else if (kind == 2)
+    {
+        firstPara = 1;
+        lastPara = anchorPara;
+
+        pIter->SetRange(anchorStart, anchorStart);
+        guard = 0;
+        while (guard++ < 4096)
+        {
+            moved = 0;
+            if (FAILED(pIter->Move(tomParagraph, -1, &moved)) || moved == 0)
+                break;
+            pIter->GetStart(&lineStart);
+            indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+            pIter->GetIndex(tomParagraph, &firstPara);
+            if (!blank && indent <= base)
+                break;
+        }
+    }
+    else if (base == 0)
+    {
+        noBlock = TRUE;
+    }
+    else
+    {
+        pIter->SetRange(anchorStart, anchorStart);
+        guard = 0;
+        while (guard++ < 4096)
+        {
+            moved = 0;
+            if (FAILED(pIter->Move(tomParagraph, -1, &moved)) || moved == 0)
+                break;
+            pIter->GetStart(&lineStart);
+            indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+            pIter->GetIndex(tomParagraph, &firstPara);
+            if (!blank && indent < base)
+                break;
+        }
+
+        pIter->SetRange(anchorStart, anchorStart);
+        guard = 0;
+        while (guard++ < 4096)
+        {
+            moved = 0;
+            if (FAILED(pIter->Move(tomParagraph, 1, &moved)) || moved == 0)
+                break;
+            pIter->GetStart(&lineStart);
+            indent = EditorIndentColumnsAt(hEdit, (int)lineStart, textLen, &blank);
+            pIter->GetIndex(tomParagraph, &lastPara);
+            if (!blank && indent < base)
+                break;
+        }
+    }
+
+    if (noBlock)
+    {
+        firstPara = 0;
+        lastPara = 0;
+    }
+    else
+    {
+        if (caretBlank)
+        {
+            if (para < firstPara)
+                firstPara = para;
+            if (para > lastPara)
+                lastPara = para;
+        }
+
+        if (firstPara < 1)
+            firstPara = 1;
+        if (lastPara > paraCount)
+            lastPara = paraCount;
+        if (lastPara < firstPara)
+            lastPara = firstPara;
+    }
+
+    if (!pDoc->bIndentBlockValid ||
+        pDoc->indentBlockFirst != (int)firstPara ||
+        pDoc->indentBlockLast != (int)lastPara)
+    {
+        pDoc->indentBlockFirst = (int)firstPara;
+        pDoc->indentBlockLast = (int)lastPara;
+        if (pDoc == g_pActiveDoc)
+            InvalidateLineNumbers();
+    }
+
+    pDoc->indentBlockBase = base;
+    pDoc->indentBlockParaCount = (int)paraCount;
+    pDoc->indentBlockKind = kind;
+    pDoc->indentBlockAnchorPara = (kind == 0) ? 0 : (int)anchorPara;
+    pDoc->bIndentBlockValid = TRUE;
+
+    pIter->Release();
+    pTextDoc->Release();
 }
 
 // No RichEdit o estilo sozinho nao controla a quebra: e preciso mandar
@@ -541,6 +875,7 @@ static void ReplaceTextAfterReinterpret(Document* pDoc, LPCWSTR lpNew)
     SendMessageW(pDoc->hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
 
     EditorUpdateCurrentLineHighlight(pDoc->hEdit);
+    EditorRestartUniversalHighlight(pDoc, TRUE);
 }
 
 // Format > Encoding. Muda a codificacao do documento ativo:
@@ -630,8 +965,10 @@ void EditorSetEncoding(TextEncoding encoding)
 
 // ---------------------------------------------------------------------------
 // Modo Insert / Overwrite (tecla Insert). O estado fica em Document::bOverwrite.
-// No Overwrite o caret vira um bloco do tamanho do caractere sob o cursor e o
-// caractere digitado substitui esse caractere; no Insert volta a barra fina.
+// No Overwrite o caret vira um sublinhado (como nos editores antigos): tem a
+// largura do caractere sob o cursor e a mesma espessura da barra do modo
+// Insert, na base da linha. O caractere digitado substitui esse caractere; no
+// Insert volta a barra fina.
 // ---------------------------------------------------------------------------
 static HWND s_hCaretOwner = NULL;   // editor cujo caret foi recriado aqui
 static int  s_caretWidth  = 0;
@@ -656,16 +993,33 @@ static int GetNormalCaretWidth(void)
     return (int)width;
 }
 
-// Largura e altura do caret. No Overwrite a largura e a do caractere sob o
-// cursor (um espaco no fim da linha, em Tab ou no fim do texto).
-static BOOL GetCaretMetrics(HWND hEdit, int caret, BOOL bOverwrite, int* pWidth, int* pHeight)
+// Largura e altura do caret e deslocamento vertical dele dentro da linha. No
+// Overwrite a largura e a do caractere sob o cursor (um espaco no fim da
+// linha, em Tab ou no fim do texto), a altura e a espessura da barra do modo
+// Insert e o deslocamento leva o sublinhado ate a base da linha.
+static BOOL GetCaretMetrics(HWND hEdit, int caret, BOOL bOverwrite,
+                            int* pWidth, int* pHeight, int* pYOffset)
 {
+    int lineHeight;
+
     HDC hdc;
     HGDIOBJ oldFont;
     TEXTMETRICW tm = {};
     SIZE size = {};
     WCHAR chars[2] = {};
     int count = 1;
+    BOOL bRealChar = TRUE;
+    int zoomNum = 0;
+    int zoomDen = 0;
+
+    // Com zoom (Ctrl+roda) o texto e desenhado em outra escala; sem isso o
+    // caret ficava com o tamanho da fonte a 100%.
+    SendMessageW(hEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
+    if (zoomNum <= 0 || zoomDen <= 0)
+    {
+        zoomNum = 1;
+        zoomDen = 1;
+    }
 
     hdc = GetDC(hEdit);
     if (hdc == NULL)
@@ -690,17 +1044,47 @@ static BOOL GetCaretMetrics(HWND hEdit, int caret, BOOL bOverwrite, int* pWidth,
         {
             chars[0] = L' ';
             count = 1;
+            bRealChar = FALSE;
         }
 
         GetTextExtentPoint32W(hdc, chars, count, &size);
         *pWidth = size.cx > 1 ? (int)size.cx : (int)tm.tmAveCharWidth;
+        *pWidth = MulDiv(*pWidth, zoomNum, zoomDen);
+
+        // A largura exata do caractere na tela (ja com zoom) e a distancia
+        // entre ele e o proximo, quando ambos estao na mesma linha.
+        if (bRealChar)
+        {
+            POINT p1 = {};
+            POINT p2 = {};
+
+            SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&p1, caret);
+            SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&p2, caret + count);
+            if (p2.y == p1.y && p2.x > p1.x)
+                *pWidth = p2.x - p1.x;
+        }
     }
     else
     {
         *pWidth = GetNormalCaretWidth();
     }
 
-    *pHeight = (int)tm.tmHeight;
+    lineHeight = MulDiv((int)tm.tmHeight, zoomNum, zoomDen);
+
+    if (bOverwrite)
+    {
+        // Sublinhado: mesma espessura da barra vertical do modo Insert (nao
+        // escala com o zoom, como a barra), colado na base da linha.
+        *pHeight = GetNormalCaretWidth();
+        if (*pHeight > lineHeight)
+            *pHeight = lineHeight;
+        *pYOffset = lineHeight - *pHeight;
+    }
+    else
+    {
+        *pHeight = lineHeight;
+        *pYOffset = 0;
+    }
 
     SelectObject(hdc, oldFont);
     ReleaseDC(hEdit, hdc);
@@ -719,6 +1103,7 @@ void EditorUpdateCaretShape(HWND hEdit)
     int end;
     int width;
     int height;
+    int yOffset = 0;
     BOOL bOverwrite;
 
     if (hEdit == NULL || GetFocus() != hEdit)
@@ -737,7 +1122,7 @@ void EditorUpdateCaretShape(HWND hEdit)
     if (start != end)
         return;
 
-    if (!GetCaretMetrics(hEdit, start, bOverwrite, &width, &height))
+    if (!GetCaretMetrics(hEdit, start, bOverwrite, &width, &height, &yOffset))
         return;
 
     // COMENTADO OU REMOVIDO: Este IF impedia o cursor de ser reaplicado 
@@ -748,10 +1133,44 @@ void EditorUpdateCaretShape(HWND hEdit)
     */
 
     SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, start);
+    pt.y += yOffset;    // Overwrite: sublinhado na base da linha
+
+    // Area em que o caret pode aparecer: a interseccao entre o retangulo de
+    // formatacao e a area cliente. Com zoom ou rolagem o caractere pode estar
+    // na borda ou fora dela, e um caret nessa posicao era desenhado por cima
+    // da barra de rolagem e de outras areas.
+    BOOL bVisible;
+    {
+        RECT rcView = {};
+        RECT rcClient = {};
+
+        SendMessageW(hEdit, EM_GETRECT, 0, (LPARAM)&rcView);
+        GetClientRect(hEdit, &rcClient);
+        IntersectRect(&rcView, &rcView, &rcClient);
+
+        bVisible = pt.x >= rcView.left && pt.x < rcView.right &&
+                   pt.y >= rcView.top && pt.y + height <= rcView.bottom;
+
+        // Na borda direita o bloco e encurtado para nao ultrapassar a area.
+        if (bVisible && pt.x + width > rcView.right)
+            width = rcView.right - pt.x;
+        if (width < 1)
+            width = 1;
+    }
 
     // CreateCaret destroi o caret anterior do RichEdit e o recria com o nosso tamanho
     if (!CreateCaret(hEdit, NULL, width, height))
         return;
+
+    // Fora da area visivel o caret fica criado, mas oculto e sem posicao,
+    // ate o caractere voltar a vista (o timer reaplica quando a rolagem muda).
+    if (!bVisible)
+    {
+        s_hCaretOwner = hEdit;
+        s_caretWidth = width;
+        s_caretHeight = height;
+        return;
+    }
 
     SetCaretPos(pt.x, pt.y);
     ShowCaret(hEdit);
@@ -766,6 +1185,78 @@ void EditorUpdateCaretShape(HWND hEdit)
     {
         EditorResetCaretShape();
     }
+}
+
+// Modo Overwrite: troca o caractere sob o cursor pelo digitado em UMA operacao,
+// sem selecionar antes e sem deixar o RichEdit tratar o WM_CHAR. Antes, a
+// selecao do caractere + a insercao geravam notificacoes e repinturas em
+// sequencia (destaque da linha, caret, numeros de linha) e a tela piscava.
+// Retorna TRUE quando o caractere foi tratado aqui (o WM_CHAR deve ser
+// descartado); FALSE deixa o caminho antigo/padrao agir (pares substitutos,
+// controle, selecao ativa, fim de linha ou do texto).
+BOOL EditorTryOverwriteChar(HWND hEdit, WCHAR ch)
+{
+    WCHAR current;
+    WCHAR text[2] = {};
+    CHARRANGE cr;
+    NMHDR nm = {};
+    HWND hParent;
+    DWORD oldMask;
+    int start;
+    int end;
+    int length = 1;
+    int id;
+
+    if (GetWindowLongPtrW(hEdit, GWL_STYLE) & ES_READONLY)
+        return FALSE;
+
+    if (ch < L' ' || ch == 0x7F)
+        return FALSE;
+
+    if (ch >= 0xD800 && ch <= 0xDFFF)
+        return FALSE;
+
+    GetEditSelection(hEdit, &start, &end);
+    if (start != end)
+        return FALSE;
+
+    current = GetEditCharAt(hEdit, start);
+    if (current == L'\0' || current == L'\r' || current == L'\n')
+        return FALSE;
+
+    if (current >= 0xD800 && current <= 0xDBFF)
+    {
+        WCHAR next = GetEditCharAt(hEdit, start + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF)
+            length = 2;
+    }
+
+    text[0] = ch;
+    cr.cpMin = start;
+    cr.cpMax = start + length;
+
+    // Sem notificacoes durante a troca: o RichEdit nao avisa a janela principal
+    // com o texto/selecao pela metade. Elas sao enviadas uma vez no final.
+    oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+    SendMessageW(hEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
+    SendMessageW(hEdit, EM_REPLACESEL, TRUE, (LPARAM)text);
+    SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
+    SendMessageW(hEdit, EM_SCROLLCARET, 0, 0);
+
+    hParent = GetParent(hEdit);
+    if (hParent != NULL)
+    {
+        id = GetDlgCtrlID(hEdit);
+
+        SendMessageW(hParent, WM_COMMAND, MAKEWPARAM(id, EN_CHANGE), (LPARAM)hEdit);
+
+        nm.hwndFrom = hEdit;
+        nm.idFrom = (UINT_PTR)id;
+        nm.code = EN_SELCHANGE;
+        SendMessageW(hParent, WM_NOTIFY, (WPARAM)id, (LPARAM)&nm);
+    }
+
+    return TRUE;
 }
 
 // Chamado antes de o RichEdit processar um caractere digitado no modo
@@ -840,6 +1331,12 @@ static BOOL EditorHandleEnter(HWND hEdit)
         return FALSE;
 
     GetEditSelection(hEdit, &start, &end);
+
+    // Com area marcada o Enter se comporta como se a auto-indentacao
+    // estivesse desligada: o RichEdit troca a selecao por uma quebra de
+    // linha simples e o cursor nao e posicionado em indentacao.
+    if (start != end)
+        return FALSE;
 
     line = (int)SendMessageW(hEdit, EM_LINEFROMCHAR, start, 0);
     if (line < 0)
@@ -963,6 +1460,34 @@ static ITextDocument* EditorGetTextDocument(HWND hEdit)
     return pTextDoc;
 }
 
+// Extremidade ativa da selecao (a que se move com o mouse/Shift+setas). Numa
+// selecao feita de baixo para cima ela e o inicio, nao o fim; a linha em
+// destaque acompanha essa extremidade. EM_EXGETSEL so informa min/max.
+static int EditorGetActiveEnd(HWND hEdit, int selStart, int selEnd)
+{
+    ITextDocument* pTextDoc;
+    ITextSelection* pSel = NULL;
+    long flags = 0;
+    int active = selEnd;
+
+    if (selEnd <= selStart)
+        return selEnd;
+
+    pTextDoc = EditorGetTextDocument(hEdit);
+    if (pTextDoc == NULL)
+        return selEnd;
+
+    if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
+    {
+        if (SUCCEEDED(pSel->GetFlags(&flags)) && (flags & tomSelStartActive))
+            active = selStart;
+        pSel->Release();
+    }
+
+    pTextDoc->Release();
+    return active;
+}
+
 static void EditorSetTextRangeBackColor(ITextRange* pRange, long color)
 {
     ITextFont* pFont = NULL;
@@ -977,6 +1502,90 @@ static void EditorSetTextRangeBackColor(ITextRange* pRange, long color)
     }
 }
 
+static void EditorSetTextRangeForeColor(ITextRange* pRange, long color)
+{
+    ITextFont* pFont = NULL;
+
+    if (pRange == NULL)
+        return;
+
+    if (SUCCEEDED(pRange->GetFont(&pFont)) && pFont != NULL)
+    {
+        pFont->SetForeColor(color);
+        pFont->Release();
+    }
+}
+
+// Pinta (ou devolve ao normal) o trecho da linha em destaque: fundo
+// NOTBAD_HIGHLIGHT_COLOR e texto NOTBAD_ACTIVE_TEXT_COLOR; normal = fundo
+// automatico e texto NOTBAD_TEXT_COLOR.
+static void EditorPaintLineRange(ITextRange* pRange, BOOL bActive)
+{
+    EditorSetTextRangeBackColor(pRange, bActive ? (long)NOTBAD_HIGHLIGHT_COLOR : (long)tomAutoColor);
+    EditorSetTextRangeForeColor(pRange, bActive ? (long)NOTBAD_ACTIVE_TEXT_COLOR : (long)NOTBAD_TEXT_COLOR);
+}
+
+// Idem para o trecho selecionado, so na cor do texto. O fundo do texto marcado
+// e desenhado pelo proprio RichEdit (cor de selecao do sistema): pintar esse
+// fundo como formato de caractere briga com o desenho da selecao e deixava
+// trechos marcados e nao marcados na mesma linha.
+static void EditorPaintSelectionRange(ITextRange* pRange, BOOL bActive)
+{
+    EditorSetTextRangeForeColor(pRange, bActive ? (long)NOTBAD_ACTIVE_TEXT_COLOR : (long)NOTBAD_TEXT_COLOR);
+}
+
+// Reaplica as cores ativas na linha em destaque e na selecao. Usada
+// quando algo (troca de fonte, cor padrao) devolveu todo o texto ao cinza.
+static void EditorReassertActiveTextColor(Document* pDoc)
+{
+    if (pDoc == NULL)
+        return;
+
+    EditorPaintLineRange(pDoc->pHighlightRange, TRUE);
+    EditorPaintSelectionRange(pDoc->pSelectionRange, TRUE);
+}
+
+// Cor do texto do documento: NOTBAD_TEXT_COLOR vira a cor padrao do RichEdit
+// (vale para o texto carregado e para o digitado). O WM_SETFONT tambem mexe no
+// formato padrao, por isso isto roda depois dele. Nao toca no undo, no estado
+// de modificado nem nas notificacoes.
+void EditorApplyTextColorTo(HWND hEdit)
+{
+    CHARFORMATW cf = {};
+    ITextDocument* pTextDoc;
+    DWORD oldMask;
+    BOOL modified;
+
+    if (hEdit == NULL)
+        return;
+
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_COLOR;
+    cf.crTextColor = NOTBAD_TEXT_COLOR;   // dwEffects = 0: sem CFE_AUTOCOLOR
+
+    pTextDoc = EditorGetTextDocument(hEdit);
+    oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+    modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
+
+    if (pTextDoc != NULL)
+        pTextDoc->Undo(tomSuspend, NULL);
+
+    SendMessageW(hEdit, EM_SETCHARFORMAT, SCF_DEFAULT, (LPARAM)&cf);
+    SendMessageW(hEdit, EM_SETCHARFORMAT, SCF_ALL, (LPARAM)&cf);
+
+    // SCF_ALL tambem cobriu a linha em destaque e a selecao.
+    EditorReassertActiveTextColor(DocFromEdit(hEdit));
+
+    if (pTextDoc != NULL)
+    {
+        pTextDoc->Undo(tomResume, NULL);
+        pTextDoc->Release();
+    }
+
+    SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
+    SendMessageW(hEdit, EM_SETEVENTMASK, 0, oldMask);
+}
+
 void EditorClearCurrentLineHighlight(Document* pDoc)
 {
     ITextDocument* pTextDoc;
@@ -984,16 +1593,24 @@ void EditorClearCurrentLineHighlight(Document* pDoc)
     BOOL modified;
     HWND hEdit;
 
-    if (pDoc == NULL || pDoc->hEdit == NULL || pDoc->pHighlightRange == NULL ||
-        s_bUpdatingHighlight)
-    {
+    if (pDoc == NULL || pDoc->hEdit == NULL || s_bUpdatingHighlight)
         return;
-    }
+
+    // O texto vai ser trocado: os tamanhos guardados deixam de valer.
+    pDoc->fgPrevSelLen = 0;
+    pDoc->fgPrevTextLen = -1;
+
+    if (pDoc->pHighlightRange == NULL && pDoc->pSelectionRange == NULL)
+        return;
 
     if (!IsWindow(pDoc->hEdit))
     {
-        pDoc->pHighlightRange->Release();
+        if (pDoc->pHighlightRange != NULL)
+            pDoc->pHighlightRange->Release();
+        if (pDoc->pSelectionRange != NULL)
+            pDoc->pSelectionRange->Release();
         pDoc->pHighlightRange = NULL;
+        pDoc->pSelectionRange = NULL;
         return;
     }
 
@@ -1006,9 +1623,19 @@ void EditorClearCurrentLineHighlight(Document* pDoc)
     if (pTextDoc != NULL)
         pTextDoc->Undo(tomSuspend, NULL);
 
-    EditorSetTextRangeBackColor(pDoc->pHighlightRange, tomAutoColor);
-    pDoc->pHighlightRange->Release();
-    pDoc->pHighlightRange = NULL;
+    if (pDoc->pSelectionRange != NULL)
+    {
+        EditorPaintSelectionRange(pDoc->pSelectionRange, FALSE);
+        pDoc->pSelectionRange->Release();
+        pDoc->pSelectionRange = NULL;
+    }
+
+    if (pDoc->pHighlightRange != NULL)
+    {
+        EditorPaintLineRange(pDoc->pHighlightRange, FALSE);
+        pDoc->pHighlightRange->Release();
+        pDoc->pHighlightRange = NULL;
+    }
 
     if (pTextDoc != NULL)
     {
@@ -1021,12 +1648,655 @@ void EditorClearCurrentLineHighlight(Document* pDoc)
     s_bUpdatingHighlight = FALSE;
 }
 
+// Limites [inicio, fim) de um ITextRange; FALSE se nulo ou vazio.
+static BOOL EditorRangeBounds(ITextRange* pRange, long* pStart, long* pEnd)
+{
+    *pStart = 0;
+    *pEnd = 0;
+
+    if (pRange == NULL)
+        return FALSE;
+
+    if (FAILED(pRange->GetStart(pStart)) || FAILED(pRange->GetEnd(pEnd)))
+    {
+        *pStart = 0;
+        *pEnd = 0;
+        return FALSE;
+    }
+
+    return *pEnd > *pStart;
+}
+
+// Diferenca simetrica de dois intervalos [a1,a2) e [b1,b2): devolve ate 2
+// intervalos em out (pares inicio/fim) e a quantidade.
+static int EditorSymDiff(long a1, long a2, long b1, long b2, long out[4])
+{
+    BOOL aEmpty = a2 <= a1;
+    BOOL bEmpty = b2 <= b1;
+    int n = 0;
+
+    if (aEmpty && bEmpty)
+        return 0;
+
+    if (aEmpty)
+    {
+        out[0] = b1;
+        out[1] = b2;
+        return 1;
+    }
+
+    if (bEmpty)
+    {
+        out[0] = a1;
+        out[1] = a2;
+        return 1;
+    }
+
+    if (a2 <= b1 || b2 <= a1)
+    {
+        out[0] = a1;
+        out[1] = a2;
+        out[2] = b1;
+        out[3] = b2;
+        return 2;
+    }
+
+    if (a1 != b1)
+    {
+        out[2 * n] = a1 < b1 ? a1 : b1;
+        out[2 * n + 1] = a1 < b1 ? b1 : a1;
+        ++n;
+    }
+
+    if (a2 != b2)
+    {
+        out[2 * n] = a2 < b2 ? a2 : b2;
+        out[2 * n + 1] = a2 < b2 ? b2 : a2;
+        ++n;
+    }
+
+    return n;
+}
+
+// Pinta [a,b) conforme o estado desejado de cada caractere: linha em destaque
+// (fundo + texto ativo) > selecao (texto ativo) > normal. O trecho e cortado nas bordas da
+// linha (ls,le) e da selecao (ss,se) para cada pedaco receber uma cor so.
+static void EditorPaintSpan(ITextDocument* pTextDoc, long a, long b,
+                            long ls, long le, long ss, long se)
+{
+    long cuts[6];
+    long v[4];
+    int n = 0;
+    int i;
+    int j;
+
+    if (b <= a)
+        return;
+
+    v[0] = ls;
+    v[1] = le;
+    v[2] = ss;
+    v[3] = se;
+
+    cuts[n++] = a;
+    for (i = 0; i < 4; ++i)
+    {
+        if (v[i] > a && v[i] < b)
+            cuts[n++] = v[i];
+    }
+    cuts[n++] = b;
+
+    for (i = 1; i < n; ++i)
+    {
+        long key = cuts[i];
+
+        for (j = i - 1; j >= 0 && cuts[j] > key; --j)
+            cuts[j + 1] = cuts[j];
+        cuts[j + 1] = key;
+    }
+
+    for (i = 0; i + 1 < n; ++i)
+    {
+        ITextRange* pRange = NULL;
+        long x = cuts[i];
+        long y = cuts[i + 1];
+
+        if (y <= x)
+            continue;
+
+        if (SUCCEEDED(pTextDoc->Range(x, y, &pRange)) && pRange != NULL)
+        {
+            if (x >= ls && x < le)
+            {
+                EditorPaintLineRange(pRange, TRUE);
+            }
+            else if (x >= ss && x < se)
+            {
+                EditorSetTextRangeBackColor(pRange, (long)tomAutoColor);
+                EditorPaintSelectionRange(pRange, TRUE);
+            }
+            else
+            {
+                EditorPaintLineRange(pRange, FALSE);
+            }
+            pRange->Release();
+        }
+    }
+}
+
+// Caminho rapido: o texto nao mudou, so a linha em destaque e/ou a selecao.
+// Em vez de apagar e repintar a selecao inteira a cada movimento do mouse (o
+// que fazia a tela piscar), so os caracteres que entram ou saem da selecao /
+// da linha sao repintados, e cada um uma unica vez, ja na cor final.
+// (ls,le) = nova linha em destaque (0,0 se desligada); (ss,se) = nova selecao
+// (vazia se nao ha). Os ITextRange de rastreamento sao trocados sem pintar.
+static void EditorMoveActiveColors(HWND hEdit, Document* pDoc,
+                                   long ls, long le, long ss, long se)
+{
+    ITextDocument* pTextDoc = EditorGetTextDocument(hEdit);
+    ITextRange* pRange = NULL;
+    long ols = 0, ole = 0, oss = 0, ose = 0;
+    long d[4];
+    int n;
+    int i;
+    BOOL hadSel;
+    DWORD oldMask;
+    BOOL modified;
+
+    if (pTextDoc == NULL)
+        return;
+
+    oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+    modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
+    pTextDoc->Undo(tomSuspend, NULL);
+
+    hadSel = pDoc->pSelectionRange != NULL;
+    EditorRangeBounds(pDoc->pHighlightRange, &ols, &ole);
+    EditorRangeBounds(pDoc->pSelectionRange, &oss, &ose);
+
+    n = EditorSymDiff(oss, ose, ss, se, d);
+    for (i = 0; i < n; ++i)
+        EditorPaintSpan(pTextDoc, d[2 * i], d[2 * i + 1], ls, le, ss, se);
+
+    n = EditorSymDiff(ols, ole, ls, le, d);
+    for (i = 0; i < n; ++i)
+        EditorPaintSpan(pTextDoc, d[2 * i], d[2 * i + 1], ls, le, ss, se);
+
+    if (pDoc->pHighlightRange != NULL)
+    {
+        pDoc->pHighlightRange->Release();
+        pDoc->pHighlightRange = NULL;
+    }
+    if (pDoc->pSelectionRange != NULL)
+    {
+        pDoc->pSelectionRange->Release();
+        pDoc->pSelectionRange = NULL;
+    }
+
+    if (le > ls && SUCCEEDED(pTextDoc->Range(ls, le, &pRange)) && pRange != NULL)
+    {
+        pDoc->pHighlightRange = pRange;
+        pRange = NULL;
+    }
+    if (se > ss && SUCCEEDED(pTextDoc->Range(ss, se, &pRange)) && pRange != NULL)
+    {
+        pDoc->pSelectionRange = pRange;
+        pRange = NULL;
+    }
+
+    // Selecao desfeita: o ponto de insercao nao pode ficar com o formato de
+    // "marcado" (ver o passo 5 de EditorUpdateCurrentLineHighlight).
+    if (hadSel && se <= ss)
+    {
+        ITextSelection* pSel = NULL;
+
+        if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
+        {
+            EditorPaintLineRange(pSel, le > ls);
+            pSel->Release();
+        }
+    }
+
+    pTextDoc->Undo(tomResume, NULL);
+    pTextDoc->Release();
+
+    SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
+    SendMessageW(hEdit, EM_SETEVENTMASK, 0, oldMask);
+}
+
+// Algoritmo unificado de realce léxico universal baseado em look-behind (Com trava para números corrigida).
+// O trecho [0, applyFrom) serve apenas de contexto para o look-behind e nao recebe negrito.
+static void EditorParseAndHighlightRange(ITextDocument* pTextDoc, ITextRange* pWordRange, const std::wstring& text, long startOffset, size_t scanLen, size_t applyFrom)
+{
+    if (pTextDoc == NULL || pWordRange == NULL || scanLen == 0)
+        return;
+
+    for (size_t i = 0; i < scanLen; ++i)
+    {
+        wchar_t ch = text[i];
+
+        if (i < applyFrom)
+            continue;
+
+        if (ch == L'(' || ch == L'[' || ch == L'{')
+        {
+            if (i == 0) continue;
+
+            int idx = (int)i - 1;
+
+            // Ignora espaços e quebras de linha/abas para trás
+            while (idx >= 0 && (text[idx] == L' ' || text[idx] == L'\t' || text[idx] == L'\r' || text[idx] == L'\n'))
+            {
+                --idx;
+            }
+
+            int wordEnd = idx + 1;
+            BOOL isValidWord = TRUE;
+            int wordStart = idx;
+
+            while (wordStart >= 0)
+            {
+                wchar_t wCh = text[wordStart];
+                
+                // Aceita alfanuméricos, underline E hífen no corpo da palavra
+                if (iswalnum(wCh) || wCh == L'_' || wCh == L'-')
+                {
+                    --wordStart;
+                }
+                else
+                {
+                    if (wordStart == idx)
+                        isValidWord = FALSE; // Evita falsos positivos como ") {"
+                    break;
+                }
+            }
+            ++wordStart;
+
+            // Garante que se o primeiro caractere for um hífen isolado, ignora
+            if (wordStart < wordEnd && text[wordStart] == L'-')
+            {
+                // Se a palavra for apenas um '-', ela se torna inválida
+                if (wordStart + 1 == wordEnd)
+                    isValidWord = FALSE;
+            }
+
+            // ===================================================================
+            // TRAVA PARA NÚMEROS CORRIGIDA: Verifica se é um número puro ou sinalizado
+            // ===================================================================
+            if (isValidWord && wordEnd > wordStart)
+            {
+                BOOL isPureNumber = TRUE;
+                int digitCount = 0;
+
+                for (int k = wordStart; k < wordEnd; ++k)
+                {
+                    if (iswdigit(text[k]))
+                    {
+                        ++digitCount;
+                    }
+                    else if (text[k] == L'-' && k == wordStart)
+                    {
+                        // Permite o sinal de menos apenas no exato começo do token
+                        continue;
+                    }
+                    else
+                    {
+                        // Qualquer caractere não numérico invalida a trava de número puro (ex: "meu-id-123")
+                        isPureNumber = FALSE;
+                        break;
+                    }
+                }
+                
+                // Só descarta se houver dígitos e o formato for um número válido (ex: "123" ou "-45")
+                if (isPureNumber && digitCount > 0)
+                {
+                    isValidWord = FALSE;
+                }
+            }
+            // ===================================================================
+
+            // Aplica o negrito apenas em nomes válidos (Funções, Métodos, Comandos)
+            if (isValidWord && wordEnd > wordStart)
+            {
+                long globalStart = startOffset + (long)wordStart;
+                long globalEnd = startOffset + (long)wordEnd;
+
+                pWordRange->SetRange(globalStart, globalEnd);
+                ITextFont* pFont = NULL;
+                if (SUCCEEDED(pWordRange->GetFont(&pFont)) && pFont != NULL)
+                {
+                    pFont->SetBold(tomTrue);
+                    pFont->Release();
+                }
+            }
+        }
+    }
+}
+
+// Executa a varredura linear minimalista na linha modificada.
+// Coloca em negrito palavras seguidas imediatamente por (, [ ou {
+static void EditorApplyUniversalHighlight(ITextDocument* pTextDoc, long start, long end)
+{
+    if (pTextDoc == NULL || end <= start)
+        return;
+
+    ITextRange* pRange = NULL;
+    if (FAILED(pTextDoc->Range(start, end, &pRange)) || pRange == NULL)
+        return;
+
+    BSTR bstrText = NULL;
+    if (SUCCEEDED(pRange->GetText(&bstrText)) && bstrText != NULL)
+    {
+        std::wstring text(bstrText);
+        
+        ITextRange* pWordRange = NULL;
+        if (SUCCEEDED(pTextDoc->Range(0, 0, &pWordRange)) && pWordRange != NULL)
+        {
+            // Executa exatamente a mesma lógica, limitada ao escopo da linha atual
+            EditorParseAndHighlightRange(pTextDoc, pWordRange, text, start, text.length(), 0);
+            pWordRange->Release();
+        }
+        SysFreeString(bstrText);
+    }
+    pRange->Release();
+}
+
+// ---------------------------------------------------------------------------
+// Highlighting lazy/paginado do arquivo inteiro.
+//
+// O texto e processado em blocos (paginas) pelo timer da janela principal, em
+// vez de varrer o arquivo todo de uma vez e congelar a interface. Cada bloco
+// traz um pequeno contexto anterior para o look-behind nao perder palavras que
+// comecem antes do limite da pagina.
+// ---------------------------------------------------------------------------
+#define CODE_HIGHLIGHT_CHUNK      8192
+#define CODE_HIGHLIGHT_CONTEXT    1024
+#define CODE_HIGHLIGHT_ALIGN_MAX  512
+#define CODE_HIGHLIGHT_TIMER_MS   15
+
+static Document* s_pCodeHighlightDoc = NULL;
+
+void EditorCancelUniversalHighlightFor(Document* pDoc)
+{
+    if (s_pCodeHighlightDoc == NULL)
+        return;
+    if (pDoc != NULL && s_pCodeHighlightDoc != pDoc)
+        return;
+
+    s_pCodeHighlightDoc = NULL;
+
+    if (g_hWndMain != NULL)
+        KillTimer(g_hWndMain, NOTBAD_CODE_HIGHLIGHT_TIMER);
+}
+
+void EditorCancelUniversalHighlight(void)
+{
+    EditorCancelUniversalHighlightFor(NULL);
+}
+
+void EditorScheduleUniversalHighlight(Document* pDoc)
+{
+    if (!g_settings.codeHighlighting || pDoc == NULL || pDoc->hEdit == NULL ||
+        !IsWindow(pDoc->hEdit) || pDoc->bCodeHighlightDone)
+    {
+        return;
+    }
+
+    s_pCodeHighlightDoc = pDoc;
+
+    if (g_hWndMain != NULL)
+        SetTimer(g_hWndMain, NOTBAD_CODE_HIGHLIGHT_TIMER, CODE_HIGHLIGHT_TIMER_MS, NULL);
+}
+
+void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear)
+{
+    if (pDoc == NULL)
+        return;
+
+    EditorCancelUniversalHighlightFor(pDoc);
+
+    pDoc->codeHighlightNext = 0;
+    pDoc->bCodeHighlightDone = FALSE;
+    pDoc->bCodeHighlightCleared = FALSE;
+    pDoc->bCodeHighlightParaValid = FALSE;
+    pDoc->bCodeHighlightTextDirty = TRUE;
+
+    if (bClear && pDoc->hEdit != NULL && IsWindow(pDoc->hEdit))
+        EditorClearUniversalHighlight(pDoc->hEdit);
+
+    EditorScheduleUniversalHighlight(pDoc);
+}
+
+void EditorInvalidateUniversalHighlight(Document* pDoc)
+{
+    if (!g_settings.codeHighlighting || pDoc == NULL)
+        return;
+
+    // A edicao invalida o trecho realcado da linha atual; ele sera limpo e
+    // recalculado por EditorUpdateCurrentLineHighlight.
+    pDoc->bCodeHighlightTextDirty = TRUE;
+
+    // Depois da primeira passada completa o formato acompanha as edicoes; a
+    // linha/paragrafo alterado e recalculado pelo destaque da linha atual.
+    if (pDoc->bCodeHighlightDone)
+        return;
+
+    // Reinicia a varredura sem limpar o documento inteiro: limpar a cada
+    // tecla durante a primeira passada causava tremor e travamento na edicao.
+    pDoc->codeHighlightNext = 0;
+    EditorScheduleUniversalHighlight(pDoc);
+}
+
+// Processa um bloco. Retorna TRUE enquanto ainda houver texto a varrer.
+BOOL EditorProcessUniversalHighlightChunk(void)
+{
+    Document* pDoc = s_pCodeHighlightDoc;
+    ITextDocument* pTextDoc;
+    ITextRange* pRange = NULL;
+    ITextRange* pWordRange = NULL;
+    BSTR bstrText = NULL;
+    GETTEXTLENGTHEX gtl = { GTL_DEFAULT | GTL_NUMCHARS, 1200 };
+    long textLen;
+    long start;
+    long end;
+    long ctxStart;
+    DWORD oldMask;
+    BOOL modified;
+
+    if (!g_settings.codeHighlighting)
+    {
+        EditorCancelUniversalHighlight();
+        return FALSE;
+    }
+
+    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
+    {
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    if (pDoc->bCodeHighlightDone)
+    {
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    textLen = (long)SendMessageW(pDoc->hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+
+    if (textLen <= 0)
+    {
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    if (pDoc->codeHighlightNext >= textLen)
+    {
+        pDoc->bCodeHighlightDone = TRUE;
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    if (!pDoc->bCodeHighlightCleared)
+    {
+        EditorClearUniversalHighlight(pDoc->hEdit);
+        pDoc->bCodeHighlightCleared = TRUE;
+    }
+
+    start = pDoc->codeHighlightNext;
+    if (start < 0)
+        start = 0;
+
+    end = start + CODE_HIGHLIGHT_CHUNK;
+    if (end > textLen)
+        end = textLen;
+
+    ctxStart = start - CODE_HIGHLIGHT_CONTEXT;
+    if (ctxStart < 0)
+        ctxStart = 0;
+
+    pTextDoc = EditorGetTextDocument(pDoc->hEdit);
+    if (pTextDoc == NULL)
+    {
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    oldMask = (DWORD)SendMessageW(pDoc->hEdit, EM_SETEVENTMASK, 0, 0);
+    modified = (BOOL)SendMessageW(pDoc->hEdit, EM_GETMODIFY, 0, 0);
+    pTextDoc->Undo(tomSuspend, NULL);
+
+    if (SUCCEEDED(pTextDoc->Range(ctxStart, end, &pRange)) && pRange != NULL &&
+        SUCCEEDED(pRange->GetText(&bstrText)) && bstrText != NULL)
+    {
+        std::wstring text(bstrText);
+        size_t applyFrom = (size_t)(start - ctxStart);
+        size_t scanLen = text.length();
+
+        // Recua o fim do bloco ate a ultima separacao (espaco/quebra/tab)
+        // dentro de um limite, para nao cortar um token no meio. Assim o
+        // proximo bloco sempre comeca em uma fronteira limpa.
+        if (end < textLen && scanLen > applyFrom)
+        {
+            size_t keep = scanLen;
+            size_t minKeep = (keep > CODE_HIGHLIGHT_ALIGN_MAX)
+                                 ? keep - CODE_HIGHLIGHT_ALIGN_MAX : 0;
+
+            if (minKeep < applyFrom)
+                minKeep = applyFrom;
+
+            while (keep > minKeep && !iswspace(text[keep - 1]))
+                --keep;
+
+            if (keep > applyFrom && keep < scanLen && iswspace(text[keep - 1]))
+            {
+                long alignedEnd = ctxStart + (long)keep;
+                if (alignedEnd > start)
+                    end = alignedEnd;
+            }
+        }
+
+        scanLen = (size_t)(end - ctxStart);
+        if (scanLen > text.length())
+            scanLen = text.length();
+
+        if (scanLen > applyFrom)
+        {
+            if (SUCCEEDED(pTextDoc->Range(0, 0, &pWordRange)) && pWordRange != NULL)
+            {
+                EditorParseAndHighlightRange(pTextDoc, pWordRange, text, ctxStart,
+                                             scanLen, applyFrom);
+                pWordRange->Release();
+            }
+        }
+    }
+
+    if (bstrText != NULL)
+        SysFreeString(bstrText);
+    if (pRange != NULL)
+        pRange->Release();
+
+    pTextDoc->Undo(tomResume, NULL);
+    pTextDoc->Release();
+
+    SendMessageW(pDoc->hEdit, EM_SETMODIFY, modified, 0);
+    SendMessageW(pDoc->hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
+
+    pDoc->codeHighlightNext = end;
+
+    if (end >= textLen)
+    {
+        pDoc->bCodeHighlightDone = TRUE;
+        s_pCodeHighlightDoc = NULL;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+// Remove todo o negrito aplicado pelo highlighting de codigo, sem entrar no
+// historico de desfazer nem marcar o documento como modificado.
+void EditorClearUniversalHighlight(HWND hEdit)
+{
+    Document* pDoc = DocFromEdit(hEdit);
+    ITextDocument* pTextDoc = EditorGetTextDocument(hEdit);
+    GETTEXTLENGTHEX gtl = { GTL_DEFAULT | GTL_NUMCHARS, 1200 };
+    ITextRange* pWholeRange = NULL;
+    long textLen;
+    DWORD oldMask;
+    BOOL modified;
+
+    if (pDoc != NULL)
+    {
+        pDoc->bCodeHighlightParaValid = FALSE;
+        pDoc->bCodeHighlightTextDirty = TRUE;
+    }
+
+    if (pTextDoc == NULL)
+        return;
+
+    textLen = (long)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+    if (textLen <= 0)
+    {
+        pTextDoc->Release();
+        return;
+    }
+
+    oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+    modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
+    SendMessageW(hEdit, WM_SETREDRAW, FALSE, 0);
+    pTextDoc->Undo(tomSuspend, NULL);
+
+    if (SUCCEEDED(pTextDoc->Range(0, textLen, &pWholeRange)) && pWholeRange != NULL)
+    {
+        ITextFont* pWholeFont = NULL;
+
+        if (SUCCEEDED(pWholeRange->GetFont(&pWholeFont)) && pWholeFont != NULL)
+        {
+            pWholeFont->SetBold(tomFalse);
+            pWholeFont->Release();
+        }
+        pWholeRange->Release();
+    }
+
+    pTextDoc->Undo(tomResume, NULL);
+    pTextDoc->Release();
+
+    SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
+    SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
+    SendMessageW(hEdit, WM_SETREDRAW, TRUE, 0);
+    RedrawWindow(hEdit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+}
+
+// Atualiza a linha em destaque (fundo NOTBAD_HIGHLIGHT_COLOR) e a cor do texto
+// ativo: a linha em destaque e a selecao ficam em NOTBAD_ACTIVE_TEXT_COLOR; o
+// resto do texto fica em NOTBAD_TEXT_COLOR. O RichEdit nao tem cor propria para
+// "texto selecionado", entao a cor e aplicada no trecho (ITextRange, como o
+// fundo do destaque) e devolvida ao cinza quando a selecao ou a linha mudam.
 void EditorUpdateCurrentLineHighlight(HWND hEdit)
 {
     Document* pDoc = DocFromEdit(hEdit);
     ITextDocument* pTextDoc;
     ITextRange* pRange = NULL;
-    ITextFont* pFont = NULL;
     GETTEXTLENGTHEX gtl = {};
     int selStart;
     int selEnd;
@@ -1037,6 +2307,21 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     int end;
     int textLen;
     int storyEnd;
+    int insLen;
+    int lineCaret;
+    int prevSelLen;
+    BOOL needInsFix;
+    BOOL grayedSel = FALSE;
+    BOOL grayedLine = FALSE;
+    int prevTextLen;
+    BOOL wantLine;
+    BOOL wantSel;
+    BOOL lineSame;
+    BOOL selSame;
+    BOOL insInside;
+    BOOL codeDirty;
+    long oldStart = 0;
+    long oldEnd = 0;
     DWORD oldMask;
     BOOL modified;
 
@@ -1047,7 +2332,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
 
     GetEditSelection(hEdit, &selStart, &selEnd);
     caret = selEnd;
-    (void)selStart;
+    lineCaret = EditorGetActiveEnd(hEdit, selStart, selEnd);
 
     gtl.flags = GTL_DEFAULT | GTL_NUMCHARS;
     gtl.codepage = 1200;
@@ -1055,14 +2340,12 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     if (textLen < 0)
         textLen = 0;
 
-    para = EditorGetParagraphNumber(hEdit, caret);
-    start = EditorGetParagraphStart(hEdit, caret);
+    EditorUpdateIndentBlock(hEdit, lineCaret, textLen);
+
+    para = EditorGetParagraphNumber(hEdit, lineCaret);
+    start = EditorGetParagraphStart(hEdit, lineCaret);
     nextStart = EditorGetParagraphStartByNumber(hEdit, para + 1);
 
-    // O RichEdit guarda um CR final alem do texto (a historia tem textLen + 1
-    // caracteres). A ultima linha vazia (documento novo, ou Enter no fim do
-    // arquivo) so tem esse CR: com o fim limitado a textLen o trecho ficava
-    // vazio e o destaque nunca aparecia ate a linha receber algum caractere.
     storyEnd = textLen + 1;
     end = nextStart > start ? nextStart : storyEnd;
     if (end > storyEnd)
@@ -1070,18 +2353,61 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     if (end <= start)
         end = start + 1;
 
-    if (g_settings.highlightCurrentLine && pDoc->pHighlightRange != NULL)
-    {
-        long oldStart = 0;
-        long oldEnd = 0;
+    wantLine = g_settings.highlightCurrentLine;
+    wantSel = selEnd > selStart;
 
-        if (SUCCEEDED(pDoc->pHighlightRange->GetStart(&oldStart)) &&
-            SUCCEEDED(pDoc->pHighlightRange->GetEnd(&oldEnd)) &&
-            oldStart == start && oldEnd == end)
-        {
-            s_bUpdatingHighlight = FALSE;
-            return;
-        }
+    lineSame = wantLine ? FALSE : (pDoc->pHighlightRange == NULL);
+    if (wantLine && pDoc->pHighlightRange != NULL &&
+        SUCCEEDED(pDoc->pHighlightRange->GetStart(&oldStart)) &&
+        SUCCEEDED(pDoc->pHighlightRange->GetEnd(&oldEnd)) &&
+        oldStart == start && oldEnd == end)
+    {
+        lineSame = TRUE;
+    }
+
+    selSame = wantSel ? FALSE : (pDoc->pSelectionRange == NULL);
+    if (wantSel && pDoc->pSelectionRange != NULL &&
+        SUCCEEDED(pDoc->pSelectionRange->GetStart(&oldStart)) &&
+        SUCCEEDED(pDoc->pSelectionRange->GetEnd(&oldEnd)) &&
+        oldStart == selStart && oldEnd == selEnd)
+    {
+        selSame = TRUE;
+    }
+
+    insLen = 0;
+    if (pDoc->fgPrevTextLen >= 0)
+        insLen = (textLen - pDoc->fgPrevTextLen) + pDoc->fgPrevSelLen;
+    if (insLen < 0)
+        insLen = 0;
+    if (insLen > caret)
+        insLen = caret;
+
+    insInside = wantLine && lineSame && pDoc->pHighlightRange != NULL &&
+                (caret - insLen) >= start && caret <= end;
+
+    prevSelLen = pDoc->fgPrevSelLen;
+    prevTextLen = pDoc->fgPrevTextLen;
+    pDoc->fgPrevTextLen = textLen;
+    pDoc->fgPrevSelLen = wantSel ? (selEnd - selStart) : 0;
+
+    needInsFix = insLen > 0;
+    (void)prevSelLen;
+
+    codeDirty = g_settings.codeHighlighting && pDoc->bCodeHighlightTextDirty;
+
+    if (lineSame && selSame && !needInsFix)
+    {
+        s_bUpdatingHighlight = FALSE;
+        return;
+    }
+
+    if (!needInsFix && prevTextLen >= 0 && prevTextLen == textLen)
+    {
+        EditorMoveActiveColors(hEdit, pDoc,
+                               wantLine ? start : 0, wantLine ? end : 0,
+                               wantSel ? selStart : 0, wantSel ? selEnd : 0);
+        s_bUpdatingHighlight = FALSE;
+        return;
     }
 
     pTextDoc = EditorGetTextDocument(hEdit);
@@ -1091,23 +2417,126 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     if (pTextDoc != NULL)
         pTextDoc->Undo(tomSuspend, NULL);
 
-    if (pDoc->pHighlightRange != NULL)
+    if (!selSame && pDoc->pSelectionRange != NULL)
     {
-        EditorSetTextRangeBackColor(pDoc->pHighlightRange, tomAutoColor);
-        pDoc->pHighlightRange->Release();
-        pDoc->pHighlightRange = NULL;
+        EditorPaintSelectionRange(pDoc->pSelectionRange, FALSE);
+        pDoc->pSelectionRange->Release();
+        pDoc->pSelectionRange = NULL;
+        grayedSel = TRUE;
     }
 
-    if (g_settings.highlightCurrentLine && pTextDoc != NULL && end > start)
+    if (!lineSame && pDoc->pHighlightRange != NULL)
+    {
+        EditorPaintLineRange(pDoc->pHighlightRange, FALSE);
+        pDoc->pHighlightRange->Release();
+        pDoc->pHighlightRange = NULL;
+        grayedLine = TRUE;
+    }
+
+    if (needInsFix && pTextDoc != NULL)
+    {
+        if (SUCCEEDED(pTextDoc->Range(caret - insLen, caret, &pRange)) && pRange != NULL)
+        {
+            EditorPaintLineRange(pRange, insInside);
+            pRange->Release();
+            pRange = NULL;
+        }
+    }
+
+    if (lineSame && (grayedSel || needInsFix))
+        EditorPaintLineRange(pDoc->pHighlightRange, TRUE);
+    if (selSame && (grayedLine || needInsFix))
+        EditorPaintSelectionRange(pDoc->pSelectionRange, TRUE);
+
+    if (!lineSame && wantLine && pTextDoc != NULL && end > start)
     {
         if (SUCCEEDED(pTextDoc->Range(start, end, &pRange)) && pRange != NULL)
         {
-            if (SUCCEEDED(pRange->GetFont(&pFont)) && pFont != NULL)
-            {
-                pFont->SetBackColor((long)NOTBAD_HIGHLIGHT_COLOR);
-                pFont->Release();
-            }
+            EditorPaintLineRange(pRange, TRUE);
             pDoc->pHighlightRange = pRange;
+            pRange = NULL;
+        }
+    }
+
+    // ===================================================================
+    // HIGH LIGHTING UNIVERSAL MINIMALISTA (LINHA ATUAL)
+    // ===================================================================
+    if (g_settings.codeHighlighting && pTextDoc != NULL && end > start)
+    {
+        int hlStart = start;
+        BOOL samePara;
+        BOOL covered = FALSE;
+
+        // Ao editar, o paragrafo anterior tambem pode ter mudado (Enter divide
+        // a linha; apagar um Enter junta duas). Reaplica os dois. Usar o
+        // caractere anterior evita depender da numeracao 0/1-based do TOM.
+        if (codeDirty && start > 0)
+        {
+            int prevStart = EditorGetParagraphStart(hEdit, start - 1);
+            if (prevStart >= 0 && prevStart < hlStart)
+                hlStart = prevStart;
+        }
+
+        samePara = pDoc->bCodeHighlightParaValid &&
+                   pDoc->codeHighlightParaStart == hlStart &&
+                   pDoc->codeHighlightParaEnd == end;
+
+        if (!codeDirty)
+        {
+            // Sem edicao: se a varredura lazy ja cobriu o trecho, ou se ele
+            // acabou de ser realcado, nao precisa limpar/reaplicar de novo.
+            if (pDoc->bCodeHighlightDone)
+                covered = TRUE;
+            else if (pDoc->codeHighlightNext > start)
+                covered = TRUE;
+            else if (samePara)
+                covered = TRUE;
+        }
+
+        if (!covered)
+        {
+            // Limpa negritos anteriores do bloco para recalcular
+            ITextRange* pCleanRange = NULL;
+            if (SUCCEEDED(pTextDoc->Range(hlStart, end, &pCleanRange)) && pCleanRange != NULL)
+            {
+                ITextFont* pFont = NULL;
+                if (SUCCEEDED(pCleanRange->GetFont(&pFont)) && pFont != NULL)
+                {
+                    pFont->SetBold(tomFalse);
+                    pFont->Release();
+                }
+                pCleanRange->Release();
+            }
+
+            // Aplica o Highlighting inteligente no trecho
+            EditorApplyUniversalHighlight(pTextDoc, hlStart, end);
+
+            pDoc->codeHighlightParaStart = hlStart;
+            pDoc->codeHighlightParaEnd = end;
+            pDoc->bCodeHighlightParaValid = TRUE;
+            pDoc->bCodeHighlightTextDirty = FALSE;
+        }
+    }
+    // ===================================================================
+
+    if (!selSame && wantSel && pTextDoc != NULL)
+    {
+        if (SUCCEEDED(pTextDoc->Range(selStart, selEnd, &pRange)) && pRange != NULL)
+        {
+            EditorPaintSelectionRange(pRange, TRUE);
+            pDoc->pSelectionRange = pRange;
+            pRange = NULL;
+        }
+    }
+
+    if (!wantSel && (needInsFix || !selSame) && pTextDoc != NULL)
+    {
+        ITextSelection* pSel = NULL;
+
+        if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
+        {
+            EditorPaintLineRange(pSel, wantLine);
+            pSel->Release();
         }
     }
 
@@ -1121,6 +2550,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     SendMessageW(hEdit, EM_SETEVENTMASK, 0, oldMask);
     s_bUpdatingHighlight = FALSE;
 }
+
 
 void EditorApplyCurrentLineHighlight(void)
 {

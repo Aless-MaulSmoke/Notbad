@@ -1,5 +1,28 @@
 # CHANGELOG IN STEPS
 
+## v1.0.3 — Completed on 11/04/2026
+
+### FIXES
+
+#### Editing
+* **Insert:** Revised the keyboard cursor system for "insert" mode: when zooming or scrolling, the cursor reverts to its default appearance while remaining in "insert" mode.
+* **Replace area:** When selecting an area and typing to replace the content, the text is replaced; however, subsequent characters typed would incorrectly appear as "selected."
+* **Selecting area with Mouse:** When selecting text with the mouse by clicking in a paragraph and dragging downward, each new line the mouse reaches becomes the highlighted line. Previously, when performing the same action by dragging upward, the highlighted line would remain stuck on the line where the selection began.
+
+#### Indentation
+* **Replace area with ENTER:** The keyboard cursor no longer positions itself within the indentation area when "indent" mode is enabled and the ENTER key is pressed within a selected block.
+
+#### Line Numbers
+* **Zooming:** When zooming in the editor with "Word Wrap" enabled, the line height would become excessive. Previously, the line number was aligned to the top; it is now centered.
+
+### IMPLEMENTATIONS
+
+#### View Menu
+* **Highlighting Code:** An option to visually highlight elements of source code. It uses a minimalist, universal approach applicable to all code (`Ctrl+Shift+K`).
+* **Line Numers with HighLight:** This is in addition to highlighting the currently indented blocks.
+
+---
+
 ## v1.0.2 — Completed on 11/03/2026
 
 ### FIXES

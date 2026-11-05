@@ -1,5 +1,43 @@
 # CHANGELOG IN STEPS
 
+## v1.0.4
+
+### FIXES
+
+#### Font
+* **Change Font:** When editing a code with active HighLighting, changing the font causes all text to lose its highlight.
+* **Window Sync:** When changing the font in one window, the other open windows fail to maintain the same zoom and size that should be standard for all windows.
+
+#### Tabs
+* **File Duplication:** Dragging an already open file into Notbad would open another tab with a replicated file. Now, when attempting this procedure, the tab containing the file simply receives focus; however, if the file is dirty, the user is asked whether it should be replaced (discarding changes) or not opened.
+
+#### Line Numbers
+* **Block Highlighting:** A bug occurs when placing the cursor on an empty line below the block above, causing that line to incorrectly become part of the block.
+
+#### Code Highlighting
+* **Formatting Inheritance:** When disabling HighLighting Code while inside a word that was highlighted, continuing to type would cause the new text to inherit the formatting of the old highlight.
+* **Shortcut Inconsistency:** With more than one tab open and focus on the File Tree, turning off HighLighting via the shortcut makes the editing across tabs inconsistent.
+
+### IMPLEMENTATIONS
+
+#### File Tree
+* **Folder Drag and Drop:** Dragging a folder into Notbad will make it open the File Tree exactly at the dragged folder.
+
+#### Indentation
+* **Shortcut Key:** Added a shortcut to turn indentation on and off. The shortcut reference is visible in the Format -> Indent menu on the right side of the Auto-indent combo, using the shortcut "Ctrl+Shift+I".
+
+#### Code Highlighting
+* **Universal Formatting:** New formatting rules for the Universal HighLighting Code. Words to the left of " = " are now rendered in bold italic, and words to the left of " : " are rendered in italic.
+
+#### Compatibility
+* **Backward Compatibility:** Compiled in Visual Studio 2017 to guarantee compatible components starting from Windows 7, adopting only the x64 version.
+
+#### Localization
+* **Language Support:** Adjusted all dialogs and user messages within the `/res/notbad.rc` file. The language must be set based on the default Windows language, and Notbad will look into a `/lang` folder starting from the executable path; if the language is, for example, `es-AR` and `AR` is not in the list, it will fallback to standard `es`. If the language does not exist in the folder, Notbad will check the internal JSON files from the compilation to see if the specific language file exists; if the language file is still missing, it will use the internal `en` from the compilation.
+
+---
+
+
 ## v1.0.3 — Completed on 11/04/2026
 
 ### FIXES
@@ -22,6 +60,7 @@
 * **Line Numers with HighLight:** This is in addition to highlighting the currently indented blocks.
 
 ---
+
 
 ## v1.0.2 — Completed on 11/03/2026
 
@@ -59,6 +98,7 @@
 
 ---
 
+
 ## v1.0.1 — Completed on 11/01/2026
 
 ### IMPLEMENTATIONS
@@ -72,6 +112,7 @@
 * **Documentation:** Update of About section, version, and documentation.
 
 ---
+
 
 ## v1.0 — Initial Base
 

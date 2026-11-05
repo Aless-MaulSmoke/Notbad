@@ -125,7 +125,12 @@ LPCWSTR EncodingName(TextEncoding encoding)
     {
     case ENC_UTF16LE:  return L"UTF-16 LE";
     case ENC_UTF16BE:  return L"UTF-16 BE";
-    case ENC_UTF8_BOM: return L"UTF-8 with BOM";
+    case ENC_UTF8_BOM:
+    {
+        LPCWSTR lpName = LangGetStringById(IDS_ENC_UTF8BOM);
+
+        return lpName != NULL ? lpName : L"UTF-8 with BOM";
+    }
     case ENC_UTF8:     return L"UTF-8";
     case ENC_GB18030:  return L"GB18030";
     case ENC_OEM:      return L"OEM";

@@ -29,10 +29,22 @@ BOOL                   g_bUpdatingTabs = FALSE;
 
 void LoadStringResource(UINT id, LPWSTR buffer, int cchBuffer)
 {
+    LPCWSTR lpTranslated;
+
     if (buffer == NULL || cchBuffer <= 0)
         return;
 
     buffer[0] = L'\0';
+
+    // Traducao do idioma carregado, se houver e couber no buffer; senao o
+    // texto em ingles do proprio notbad.rc.
+    lpTranslated = LangGetStringById(id);
+    if (lpTranslated != NULL && lstrlenW(lpTranslated) < cchBuffer)
+    {
+        StringCchCopyW(buffer, (size_t)cchBuffer, lpTranslated);
+        return;
+    }
+
     LoadStringW(g_hInstance, id, buffer, cchBuffer);
 }
 
@@ -90,6 +102,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow, LPWSTR lpCmdLine)
 
     SettingsLoad();
     SettingsLoadFont();
+    LangInit();
 
     if (lpCmdLine != NULL && lpCmdLine[0] != L'\0')
     {

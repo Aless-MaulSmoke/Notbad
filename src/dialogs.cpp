@@ -15,8 +15,12 @@ static INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM 
     case WM_INITDIALOG:
     {
         WCHAR szVersion[64];
+        WCHAR szFormat[64];
 
-        StringCchPrintfW(szVersion, ARRAYSIZE(szVersion), L"Version %s", NOTBAD_VERSION);
+        LangApplyDialog(hDlg, IDD_ABOUT);
+
+        LoadStringResource(IDS_ABOUT_VERSION, szFormat, ARRAYSIZE(szFormat));
+        StringCchPrintfW(szVersion, ARRAYSIZE(szVersion), szFormat, NOTBAD_VERSION);
         SetDlgItemTextW(hDlg, IDC_ABOUT_VERSION, szVersion);
 
         if (g_hAboutLogo != NULL)
@@ -99,6 +103,8 @@ static INT_PTR CALLBACK IndentDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM
         HWND hEdit = GetDlgItem(hDlg, IDC_INDENT_SIZE);
         HWND hSpin;
 
+        LangApplyDialog(hDlg, IDD_INDENT);
+
         SetWindowLongPtrW(hDlg, DWLP_USER, lParam);
 
         CheckDlgButton(hDlg, IDC_INDENT_AUTO,
@@ -131,6 +137,17 @@ static INT_PTR CALLBACK IndentDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM
         }
         return TRUE;
     }
+
+    case WM_CTLCOLORSTATIC:
+        // Etiqueta do atalho (Ctrl+Shift+I): cor de texto desabilitado, como o
+        // atalho exibido nos itens de menu.
+        if ((HWND)lParam == GetDlgItem(hDlg, IDC_INDENT_AUTO_HINT))
+        {
+            SetTextColor((HDC)wParam, GetSysColor(COLOR_GRAYTEXT));
+            SetBkMode((HDC)wParam, TRANSPARENT);
+            return (INT_PTR)GetSysColorBrush(COLOR_BTNFACE);
+        }
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wParam))
@@ -209,6 +226,7 @@ static INT_PTR CALLBACK GoToDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
     case WM_INITDIALOG:
     {
         CHARRANGE cr = {};
+        LangApplyDialog(hDlg, IDD_GOTO);
         SendMessageW(g_hWndEdit, EM_EXGETSEL, 0, (LPARAM)&cr);
         int line = EditorGetParagraphNumber(g_hWndEdit, (int)cr.cpMin);
         if (line < 1)
@@ -418,13 +436,11 @@ void DoPrint(HWND hWnd)
 
 void ShowHelp(HWND hWnd)
 {
-    MessageBoxW(hWnd,
-                L"Notbad " NOTBAD_VERSION L"\n\n"
-                L"File: New, Open, Save, Save As, Save All and Close Tab.\n"
-                L"Open Folder shows the folder tree; double-click a file to open it.\n"
-                L"Edit: Undo, Cut, Copy, Paste, Find, Replace and Go To.\n"
-                L"Format: Word Wrap, Font and Indentation.\n"
-                L"View: switch tabs, toggle the file tree, line numbers and status bar.\n\n"
-                L"Shortcuts: Ctrl+N/O/S, Ctrl+F/H/G, Ctrl+Tab, Ctrl+T, Ctrl+Shift+L.",
-                NOTBAD_NAME, MB_ICONINFORMATION | MB_OK);
+    WCHAR szFormat[1024];
+    WCHAR szMessage[1280];
+
+    LoadStringResource(IDS_HELP_TEXT, szFormat, ARRAYSIZE(szFormat));
+    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat, NOTBAD_VERSION);
+
+    MessageBoxW(hWnd, szMessage, NOTBAD_NAME, MB_ICONINFORMATION | MB_OK);
 }

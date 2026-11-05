@@ -138,6 +138,13 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
         }
     }
 
+    // Ctrl+roda muda o zoom so deste RichEdit: replica nas demais abas.
+    if (msg == WM_MOUSEWHEEL && (LOWORD(wParam) & MK_CONTROL) != 0 &&
+        DocFromEdit(hWnd) == g_pActiveDoc)
+    {
+        EditorSyncZoomFrom(hWnd);
+    }
+
     if (msg == WM_VSCROLL || msg == WM_MOUSEWHEEL)
         InvalidateLineNumbers();
 
@@ -174,6 +181,7 @@ static HWND CreateRichEdit(Document* pDoc)
 
     EditorApplyTextColorTo(hEdit);
     EditorApplyTabWidthTo(hEdit);
+    EditorApplyGlobalZoomTo(hEdit);
 
     return hEdit;
 }
@@ -327,6 +335,9 @@ void DocActivate(Document* pDoc)
         ShowWindow(g_documents[i]->hEdit, g_documents[i] == pDoc ? SW_SHOW : SW_HIDE);
     }
 
+    // Rede de seguranca: a aba que aparece segue o zoom global.
+    EditorApplyGlobalZoomTo(pDoc->hEdit);
+
     LayoutMainWindow();
     EditorApplyTabWidthTo(pDoc->hEdit);
     InvalidateLineNumbers();
@@ -334,10 +345,13 @@ void DocActivate(Document* pDoc)
     UpdateStatusBar();
     UpdateEditMenuState(g_hWndMain);
     SetFocus(pDoc->hEdit);
-    EditorUpdateCurrentLineHighlight(pDoc->hEdit);
 
-    // Retoma (ou inicia) a varredura lazy do realce global ao mudar de aba.
-    EditorScheduleUniversalHighlight(pDoc);
+    // Reanalisa o realce da aba que recebeu o foco: se o highlighting foi
+    // ligado/desligado enquanto ela estava oculta, ela se ajusta agora; senao
+    // apenas retoma a varredura lazy. Vem antes da linha atual, que depende
+    // dos flags reiniciados aqui.
+    EditorSyncUniversalHighlight(pDoc);
+    EditorUpdateCurrentLineHighlight(pDoc->hEdit);
 }
 
 Document* DocCreate(void)
@@ -473,6 +487,63 @@ void DocDestroyAll(void)
     g_hWndEdit = NULL;
 }
 
+// Buffers de normalizacao em pilha: MAX_FILE_PATH (32768) custaria 64 KB cada.
+// Caminhos maiores que isso caem na comparacao direta em DocFindByPath.
+#define DOC_NORM_PATH_MAX 4096
+
+// Resolve um caminho para a forma absoluta e longa (sem 8.3, sem ".."), para
+// comparar caminhos que chegam por origens diferentes (arrastar, Explorer,
+// dialogo). Retorna FALSE se nao couber no buffer.
+static BOOL DocNormalizePath(LPCWSTR lpPath, LPWSTR lpOut, DWORD cchOut)
+{
+    WCHAR szFull[DOC_NORM_PATH_MAX];
+    DWORD n = GetFullPathNameW(lpPath, ARRAYSIZE(szFull), szFull, NULL);
+
+    if (n == 0 || n >= ARRAYSIZE(szFull))
+        return FALSE;
+
+    n = GetLongPathNameW(szFull, lpOut, cchOut);
+    if (n == 0 || n >= cchOut)
+        return SUCCEEDED(StringCchCopyW(lpOut, cchOut, szFull));
+
+    return TRUE;
+}
+
+// Retorna o documento aberto que corresponde ao arquivo, ou NULL. A
+// comparacao e case-insensitive, como no Windows.
+Document* DocFindByPath(LPCWSTR lpFileName)
+{
+    WCHAR szWanted[DOC_NORM_PATH_MAX];
+    WCHAR szOther[DOC_NORM_PATH_MAX];
+    BOOL bHaveWanted;
+    size_t i;
+
+    if (lpFileName == NULL || lpFileName[0] == L'\0')
+        return NULL;
+
+    bHaveWanted = DocNormalizePath(lpFileName, szWanted, ARRAYSIZE(szWanted));
+
+    for (i = 0; i < g_documents.size(); ++i)
+    {
+        Document* pDoc = g_documents[i];
+
+        if (!pDoc->bHasPath)
+            continue;
+
+        if (lstrcmpiW(lpFileName, pDoc->szFilePath) == 0)
+            return pDoc;
+
+        if (bHaveWanted &&
+            DocNormalizePath(pDoc->szFilePath, szOther, ARRAYSIZE(szOther)) &&
+            lstrcmpiW(szWanted, szOther) == 0)
+        {
+            return pDoc;
+        }
+    }
+
+    return NULL;
+}
+
 BOOL DocLoad(Document* pDoc, LPCWSTR lpFileName)
 {
     LPWSTR lpText = NULL;
@@ -536,6 +607,11 @@ BOOL DocLoad(Document* pDoc, LPCWSTR lpFileName)
 
         // Reinicia a varredura lazy para o texto recem-carregado.
         EditorRestartUniversalHighlight(pDoc, TRUE);
+    }
+    else
+    {
+        // Aba oculta: nao mexe no editor agora; ao ativar, DocActivate reanalisa.
+        pDoc->bCodeHighlightSynced = FALSE;
     }
 
     return TRUE;

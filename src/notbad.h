@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.3"
+#define NOTBAD_VERSION     L"1.0.4"
 #define WM_NOTBAD_CLOSETAB (WM_APP + 1)
 #define NOTBAD_CODE_HIGHLIGHT_TIMER 0x4C48
 #define MAX_EDIT_BUFFER     0x7FFFFFF0u
@@ -28,7 +28,7 @@
 // Todas as cores do editor ficam aqui.
 //
 // Texto
-#define NOTBAD_TEXT_COLOR            RGB(64, 64, 64)  // texto do documento (cinza medio)
+#define NOTBAD_TEXT_COLOR            RGB(60, 60, 60)     // texto do documento (cinza medio)
 #define NOTBAD_ACTIVE_TEXT_COLOR     RGB(0, 0, 0)        // texto na selecao e na linha em destaque
 // Fundos
 #define NOTBAD_HIGHLIGHT_COLOR       RGB(240, 240, 240)  // fundo da linha em destaque
@@ -89,6 +89,7 @@ struct Document
     int          codeHighlightParaEnd;   // fim do ultimo trecho realcado na linha atual
     BOOL         bCodeHighlightParaValid; // o trecho acima ainda reflete o texto atual
     BOOL         bCodeHighlightTextDirty; // houve edicao desde o ultimo realce da linha atual
+    BOOL         bCodeHighlightSynced;    // estado do realce deste documento reflete g_settings.codeHighlighting
     int          indentBlockFirst;     // primeiro paragrafo (1-based) do bloco de indentacao atual
     int          indentBlockLast;      // ultimo paragrafo (1-based) do bloco de indentacao atual
     int          indentBlockBase;      // indentacao (colunas) que define o bloco
@@ -126,6 +127,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow, LPWSTR lpCmdLine);
 int  RunMessageLoop(void);
 void LoadStringResource(UINT id, LPWSTR buffer, int cchBuffer);
 
+// Idiomas (lang.cpp)
+void    LangInit(void);
+LPCWSTR LangGetString(LPCWSTR lpKey);
+LPCWSTR LangGetStringById(UINT id);
+LPCWSTR LangCurrentTag(void);
+void    LangApplyMenu(HWND hWnd);
+void    LangApplyDialog(HWND hDlg, UINT idd);
+
 // window.cpp
 LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LineNumbersWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -143,6 +152,7 @@ Document* DocActive(void);
 Document* DocFromEdit(HWND hEdit);
 int       DocIndexOf(Document* pDoc);
 Document* DocCreate(void);
+Document* DocFindByPath(LPCWSTR lpFileName);
 void      DocDestroy(Document* pDoc);
 void      DocDestroyAll(void);
 BOOL      DocLoad(Document* pDoc, LPCWSTR lpFileName);
@@ -162,12 +172,15 @@ void      DocGetDisplayName(Document* pDoc, LPWSTR lpBuffer, int cchBuffer);
 // editor.cpp
 void EditorNew(void);
 BOOL EditorOpen(LPCWSTR lpFileName);
+BOOL EditorOpenDropped(LPCWSTR lpFileName);
 BOOL EditorSave(BOOL bSaveAs);
 BOOL EditorSaveFile(LPCWSTR lpFileName);
 BOOL EditorQuerySaveChanges(void);
 void EditorSetModified(BOOL bModified);
 BOOL EditorIsModified(void);
 void EditorSetFont(HFONT hFont);
+void EditorSyncZoomFrom(HWND hSource);
+void EditorApplyGlobalZoomTo(HWND hEdit);
 void EditorApplyWordWrap(BOOL bWrap);
 void EditorApplyWordWrapTo(HWND hEdit, BOOL bWrap);
 int  EditorGetParagraphNumber(HWND hEdit, int charIndex);
@@ -199,6 +212,7 @@ BOOL EditorHandleKeyDown(HWND hEdit, WPARAM wParam);
 void EditorClearUniversalHighlight(HWND hEdit);
 void EditorScheduleUniversalHighlight(Document* pDoc);
 void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear);
+void EditorSyncUniversalHighlight(Document* pDoc);
 void EditorInvalidateUniversalHighlight(Document* pDoc);
 void EditorCancelUniversalHighlight(void);
 void EditorCancelUniversalHighlightFor(Document* pDoc);

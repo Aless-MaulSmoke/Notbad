@@ -5,6 +5,10 @@ IDI_NOTBAD ICON "../images/icon-256.ico"
 IDI_NOTBAD_TITLE ICON "../images/n_icon-256.ico"
 IDB_ABOUT_LOGO BITMAP "notbad-about.bmp"
 
+// Idiomas embutidos (JSON em UTF-8). Nome: NBLANG_<TAG> com '-' trocado por '_'
+// (pt-BR -> NBLANG_PT_BR). Veja lang/en.json e tools/lang_tool.py.
+NBLANG_EN RCDATA "../lang/en.json"
+
 IDR_MAINMENU MENU
 BEGIN
     POPUP "&File"
@@ -81,6 +85,7 @@ BEGIN
     "L",            IDM_LINENUMBERS, VIRTKEY, CONTROL, SHIFT
     "H",            IDM_HIGHLIGHTLINE, VIRTKEY, CONTROL, SHIFT
     "K",            IDM_HIGHLIGHTCODE, VIRTKEY, CONTROL, SHIFT
+    "I",            IDM_INDENT_TOGGLE, VIRTKEY, CONTROL, SHIFT
     "S",            IDM_SAVE,       VIRTKEY, CONTROL
     "S",            IDM_SAVEAS,     VIRTKEY, CONTROL, SHIFT
     "S",            IDM_SAVEALL,    VIRTKEY, CONTROL, ALT
@@ -114,6 +119,17 @@ BEGIN
     IDS_STATUS_COL      "%u%%"
     IDS_ENC_ASK         "Yes: Convert\nKeep the text exactly as it appears and save it as\n%s\n\nNo: Reinterpret\nRead the file's bytes as %s;\nthe characters shown will change."
     IDS_ENC_LOSS        "Some characters cannot be represented in %s and will be replaced when the file is saved. Do you want to continue?"
+    IDS_REOPEN_DIRTY    "%s is already open and has unsaved changes.\n\nDo you want to reopen the file and discard the current changes?"
+    IDS_ABOUT_VERSION   "Version %s"
+    IDS_HELP_TEXT       "Notbad %s\n\nFile: New, Open, Save, Save As, Save All and Close Tab.\nOpen Folder shows the folder tree; double-click a file to open it.\nEdit: Undo, Cut, Copy, Paste, Find, Replace and Go To.\nFormat: Word Wrap, Font and Indentation.\nView: switch tabs, toggle the file tree, line numbers and status bar.\n\nShortcuts: Ctrl+N/O/S, Ctrl+F/H/G, Ctrl+Tab, Ctrl+T, Ctrl+Shift+L."
+    IDS_INDENT_NO_TABS  "There are no tabs in the indentation of this tab."
+    IDS_INDENT_NO_SPACES "There are no runs of spaces long enough to convert to tabs."
+    IDS_FIND_TITLE      "Find"
+    IDS_REPLACE_TITLE   "Replace"
+    IDS_FIND_NOT_FOUND  "Cannot find ""%s""."
+    IDS_REPLACED_COUNT  "Replaced %d occurrence(s)."
+    IDS_STATUS_AUTOINDENT "Auto-indent"
+    IDS_ENC_UTF8BOM     "UTF-8 with BOM"
 END
 
 IDD_ABOUT DIALOGEX 0, 0, 340, 186
@@ -123,7 +139,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_ABOUT_IMAGE, "Static", SS_BITMAP | SS_REALSIZECONTROL, 12, 12, 64, 64
     LTEXT           "Notbad", IDC_ABOUT_NAME, 88, 14, 240, 14
-    LTEXT           "Version 1.0.3", IDC_ABOUT_VERSION, 88, 30, 240, 10
+    LTEXT           "Version 1.0.4", IDC_ABOUT_VERSION, 88, 30, 240, 10
     LTEXT           "A modern and ""notbad"" reimagining of the traditional notepad text editor, keeping the lightweight soul you love with the power features you need.", IDC_ABOUT_COPYRIGHT, 88, 48, 240, 44
     LTEXT           "Project Team:", IDC_ABOUT_TEAM_LABEL, 12, 112, 316, 10
     LTEXT           "* Aless MaulSmoke: Project Manager | Concept | Code Review", IDC_ABOUT_TEAM1, 16, 128, 312, 10
@@ -170,7 +186,8 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSM
 CAPTION "Indentation"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    CONTROL         "&Auto-indent new lines", IDC_INDENT_AUTO, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 10, 10, 180, 10
+    CONTROL         "&Auto-indent new lines", IDC_INDENT_AUTO, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 10, 10, 112, 10
+    LTEXT           "Ctrl+Shift+I", IDC_INDENT_AUTO_HINT, 124, 10, 66, 10, SS_RIGHT | SS_NOPREFIX
     LTEXT           "Tab &size:", IDC_INDENT_SIZE_LABEL, 10, 30, 50, 10
     EDITTEXT        IDC_INDENT_SIZE, 62, 28, 40, 14, ES_AUTOHSCROLL | ES_NUMBER
     GROUPBOX        "Indent &using", IDC_INDENT_STYLE_GROUP, 10, 50, 180, 34
@@ -199,11 +216,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Notbad"
             VALUE "FileDescription", "Notbad"
-            VALUE "FileVersion", "1.0.3.0"
+            VALUE "FileVersion", "1.0.4.0"
             VALUE "InternalName", "Notbad"
             VALUE "OriginalFilename", "Notbad.exe"
             VALUE "ProductName", "Notbad"
-            VALUE "ProductVersion", "1.0.3.0"
+            VALUE "ProductVersion", "1.0.4.0"
         END
     END
     BLOCK "VarFileInfo"

@@ -53,6 +53,7 @@
 #define IDC_INDENT_STYLE_GROUP      249
 #define IDC_INDENT_SPACES           250
 #define IDC_INDENT_TABS             251
+#define IDC_INDENT_AUTO_HINT        252
 
 #define IDM_NEW                     0x1001
 #define IDM_OPEN                    0x1002
@@ -88,6 +89,7 @@
 #define IDM_INDENT                  0x1035
 #define IDM_HIGHLIGHTLINE           0x1036
 #define IDM_HIGHLIGHTCODE           0x1037
+#define IDM_INDENT_TOGGLE           0x1038
 #define IDM_HELP                    0x1040
 #define IDM_ABOUT                   0x1041
 
@@ -113,3 +115,14 @@
 #define IDS_STATUS_COL              0x200A
 #define IDS_ENC_ASK                 0x200B
 #define IDS_ENC_LOSS                0x200C
+#define IDS_REOPEN_DIRTY            0x200D
+#define IDS_ABOUT_VERSION           0x200E
+#define IDS_HELP_TEXT               0x200F
+#define IDS_INDENT_NO_TABS          0x2010
+#define IDS_INDENT_NO_SPACES        0x2011
+#define IDS_FIND_TITLE              0x2012
+#define IDS_REPLACE_TITLE           0x2013
+#define IDS_FIND_NOT_FOUND          0x2014
+#define IDS_REPLACED_COUNT          0x2015
+#define IDS_STATUS_AUTOINDENT       0x2016
+#define IDS_ENC_UTF8BOM             0x2017

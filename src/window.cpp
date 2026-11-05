@@ -1105,22 +1105,36 @@ static void ToggleCurrentLineHighlight(void)
     SettingsSave();
 }
 
+static void ToggleAutoIndent(void)
+{
+    g_settings.autoIndent = !g_settings.autoIndent;
+    SettingsSave();
+
+    // Invalida o bloco destacado, repinta a numeracao e atualiza a barra de status.
+    EditorApplyIndentation();
+    UpdateEditMenuState(g_hWndMain);
+}
+
 static void ToggleCodeHighlighting(void)
 {
     size_t i;
 
     g_settings.codeHighlighting = !g_settings.codeHighlighting;
 
-    if (!g_settings.codeHighlighting)
-        EditorCancelUniversalHighlight();
+    EditorCancelUniversalHighlight();
 
+    // So o documento ativo e processado agora. Os demais (editores ocultos)
+    // apenas ficam marcados como nao sincronizados e se ajustam em
+    // DocActivate -> EditorSyncUniversalHighlight, quando a aba receber o foco.
     for (i = 0; i < g_documents.size(); ++i)
-        EditorRestartUniversalHighlight(g_documents[i], TRUE);
+        g_documents[i]->bCodeHighlightSynced = FALSE;
 
-    if (g_settings.codeHighlighting && g_pActiveDoc != NULL)
-        EditorScheduleUniversalHighlight(g_pActiveDoc);
+    if (g_pActiveDoc != NULL)
+    {
+        EditorSyncUniversalHighlight(g_pActiveDoc);
+        EditorUpdateCurrentLineHighlight(g_pActiveDoc->hEdit);
+    }
 
-    EditorApplyCurrentLineHighlight();
     UpdateEditMenuState(g_hWndMain);
     SettingsSave();
 }
@@ -1721,6 +1735,7 @@ BOOL CreateNotbadWindow(HINSTANCE hInstance, int nCmdShow, LPCWSTR lpFilePath)
         return FALSE;
 
     g_hMenu = GetMenu(g_hWndMain);
+    LangApplyMenu(g_hWndMain);
 
     ShowWindow(g_hWndMain, nCmdShow);
 
@@ -1795,24 +1810,28 @@ void UpdateStatusBar(void)
     WCHAR szLine[128];
     WCHAR szCol[128];
     WCHAR szEnc[64];
+    WCHAR szIndent[64];
+    WCHAR szFormat[64];
 
-    StringCchPrintfW(szLine, ARRAYSIZE(szLine), L"Ln %d, Col %d", line, col + 1);
+    LoadStringResource(IDS_STATUS_LINE, szFormat, ARRAYSIZE(szFormat));
+    StringCchPrintfW(szLine, ARRAYSIZE(szLine), szFormat, (UINT)line, (UINT)(col + 1));
 
     // Comprimento no mesmo espaco de indices do RichEdit (CR, nao CRLF).
     GETTEXTLENGTHEX gtl = {};
     gtl.flags = GTL_DEFAULT | GTL_NUMCHARS;
     gtl.codepage = 1200;
     int length = (int)SendMessageW(g_hWndEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+    LoadStringResource(IDS_STATUS_COL, szFormat, ARRAYSIZE(szFormat));
     if (length <= 0)
-        StringCchCopyW(szCol, ARRAYSIZE(szCol), L"100%");
+        StringCchPrintfW(szCol, ARRAYSIZE(szCol), szFormat, 100u);
     else
-        StringCchPrintfW(szCol, ARRAYSIZE(szCol), L"%d%%", (caret * 100) / length);
+        StringCchPrintfW(szCol, ARRAYSIZE(szCol), szFormat, (UINT)((caret * 100) / length));
 
     switch (encoding)
     {
     case ENC_UTF16LE: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"UTF-16 LE"); break;
     case ENC_UTF16BE: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"UTF-16 BE"); break;
-    case ENC_UTF8_BOM: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"UTF-8 with BOM"); break;
+    case ENC_UTF8_BOM: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), EncodingName(ENC_UTF8_BOM)); break;
     case ENC_UTF8: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"UTF-8"); break;
     case ENC_GB18030: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"GB18030"); break;
     case ENC_OEM: StringCchCopyW(szEnc, ARRAYSIZE(szEnc), L"OEM"); break;
@@ -1824,8 +1843,11 @@ void UpdateStatusBar(void)
     UpdateStatusBarParts(rc.right);
 
     SendMessageW(g_hWndStatus, SB_SETTEXTW, 0, (LPARAM)szLine);
-    SendMessageW(g_hWndStatus, SB_SETTEXTW, 1,
-                 (LPARAM)(g_settings.autoIndent ? L"Auto-indent" : L""));
+    szIndent[0] = L'\0';
+    if (g_settings.autoIndent)
+        LoadStringResource(IDS_STATUS_AUTOINDENT, szIndent, ARRAYSIZE(szIndent));
+
+    SendMessageW(g_hWndStatus, SB_SETTEXTW, 1, (LPARAM)szIndent);
     SendMessageW(g_hWndStatus, SB_SETTEXTW, 2, (LPARAM)szEnc);
     SendMessageW(g_hWndStatus, SB_SETTEXTW, 3, (LPARAM)szCol);
 }
@@ -2304,6 +2326,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             ToggleCodeHighlighting();
             return 0;
 
+        case IDM_INDENT_TOGGLE:
+            ToggleAutoIndent();
+            return 0;
+
         case IDM_SAVE:
             EditorSave(FALSE);
             return 0;
@@ -2488,13 +2514,36 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     {
         HDROP hDrop = (HDROP)wParam;
         UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+        WCHAR szFile[MAX_FILE_PATH];
+        DWORD attrs;
         UINT i;
+
+        // Uma unica pasta arrastada abre o File Tree exatamente nela. Com mais
+        // de um item no arrasto, este atalho nao vale.
+        if (count == 1 && DragQueryFileW(hDrop, 0, szFile, ARRAYSIZE(szFile)) != 0)
+        {
+            attrs = GetFileAttributesW(szFile);
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                OpenFolderInTree(szFile);
+                DragFinish(hDrop);
+                SetForegroundWindow(hWnd);
+                return 0;
+            }
+        }
 
         for (i = 0; i < count; ++i)
         {
-            WCHAR szFile[MAX_FILE_PATH];
-            if (DragQueryFileW(hDrop, i, szFile, ARRAYSIZE(szFile)) != 0)
-                EditorOpen(szFile);
+            if (DragQueryFileW(hDrop, i, szFile, ARRAYSIZE(szFile)) == 0)
+                continue;
+
+            // Pasta em arrasto misto: ignorada, em vez de tentar abri-la como
+            // arquivo e mostrar "Cannot open the file".
+            attrs = GetFileAttributesW(szFile);
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
+                continue;
+
+            EditorOpenDropped(szFile);
         }
 
         DragFinish(hDrop);

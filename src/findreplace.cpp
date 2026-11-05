@@ -115,10 +115,11 @@ static void SetFindStatus(LPCWSTR lpText)
 
 static void ReportNotFound(void)
 {
+    WCHAR szFormat[256];
     WCHAR szMessage[512];
 
-    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage),
-                     L"Cannot find \"%s\".", g_szFind);
+    LoadStringResource(IDS_FIND_NOT_FOUND, szFormat, ARRAYSIZE(szFormat));
+    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat, g_szFind);
 
     if (g_hFindDialog != NULL)
         SetFindStatus(szMessage);
@@ -144,9 +145,13 @@ static void UpdateDialogControls(HWND hDlg)
     if (hDlg == NULL)
         return;
 
+    WCHAR szTitle[64];
+
     g_bUpdatingControls = TRUE;
 
-    SetWindowTextW(hDlg, g_bReplaceMode ? L"Replace" : L"Find");
+    LoadStringResource(g_bReplaceMode ? IDS_REPLACE_TITLE : IDS_FIND_TITLE,
+                       szTitle, ARRAYSIZE(szTitle));
+    SetWindowTextW(hDlg, szTitle);
     SetDlgItemTextW(hDlg, IDC_FIND_EDIT, g_szFind);
     SetDlgItemTextW(hDlg, IDC_REPLACE_EDIT, g_szReplace);
     CheckDlgButton(hDlg, IDC_MATCHCASE, g_bMatchCase ? BST_CHECKED : BST_UNCHECKED);
@@ -409,6 +414,7 @@ static int ReplaceAllInDocument(Document* pDoc)
 static void DoReplaceAll(void)
 {
     int total = 0;
+    WCHAR szFormat[128];
     WCHAR szMessage[256];
     size_t i;
 
@@ -428,8 +434,8 @@ static void DoReplaceAll(void)
         total = ReplaceAllInDocument(g_pActiveDoc);
     }
 
-    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage),
-                     L"Replaced %d occurrence(s).", total);
+    LoadStringResource(IDS_REPLACED_COUNT, szFormat, ARRAYSIZE(szFormat));
+    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat, total);
     SetFindStatus(szMessage);
 
     UpdateWindowTitle();
@@ -444,6 +450,7 @@ static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
     case WM_INITDIALOG:
         g_hFindDialog = hDlg;
         g_bReplaceMode = (BOOL)lParam;
+        LangApplyDialog(hDlg, IDD_FIND);
         SendDlgItemMessageW(hDlg, IDC_FIND_EDIT, EM_SETLIMITTEXT,
                             ARRAYSIZE(g_szFind) - 1, 0);
         SendDlgItemMessageW(hDlg, IDC_REPLACE_EDIT, EM_SETLIMITTEXT,

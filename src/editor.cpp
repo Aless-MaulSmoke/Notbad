@@ -137,6 +137,39 @@ void EditorNew(void)
     DocCreate();
 }
 
+// Abertura por arrastar e soltar: se o arquivo ja esta aberto, ativa a aba
+// existente em vez de criar outra. Se a aba tem alteracoes nao salvas,
+// pergunta se deve reabrir o arquivo descartando-as; "No" apenas mantem a aba
+// ativa com as alteracoes.
+BOOL EditorOpenDropped(LPCWSTR lpFileName)
+{
+    Document* pDoc = DocFindByPath(lpFileName);
+    WCHAR szFormat[512];
+    WCHAR szName[MAX_PATH];
+    WCHAR szMessage[1024];
+
+    if (pDoc == NULL)
+        return EditorOpen(lpFileName);
+
+    // Primeiro mostra a aba, para o usuario ver de qual arquivo se trata.
+    DocActivate(pDoc);
+
+    if (!SendMessageW(pDoc->hEdit, EM_GETMODIFY, 0, 0))
+        return TRUE;
+
+    DocGetDisplayName(pDoc, szName, ARRAYSIZE(szName));
+    LoadStringResource(IDS_REOPEN_DIRTY, szFormat, ARRAYSIZE(szFormat));
+    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat, szName);
+
+    if (MessageBoxW(g_hWndMain, szMessage, NOTBAD_NAME,
+                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+        return TRUE;
+
+    // DocLoad so troca o texto depois de ler o arquivo com sucesso; se a
+    // leitura falhar, mostra o erro e a aba continua como estava.
+    return DocLoad(pDoc, pDoc->szFilePath);
+}
+
 BOOL EditorOpen(LPCWSTR lpFileName)
 {
     Document* pDoc = DocCreate();
@@ -185,6 +218,61 @@ BOOL EditorIsModified(void)
     return (BOOL)SendMessageW(g_hWndEdit, EM_GETMODIFY, 0, 0);
 }
 
+// O zoom (Ctrl+roda) pertence ao RichEdit, ou seja, a cada aba. Como a fonte,
+// ele deve valer para todas as abas: guarda-se o ultimo zoom escolhido e ele e
+// replicado nas demais. 0/0 = zoom desligado (100%).
+static int s_zoomNum = 0;
+static int s_zoomDen = 0;
+
+static void EditorReadZoom(HWND hEdit, int* pNum, int* pDen)
+{
+    int num = 0;
+    int den = 0;
+
+    SendMessageW(hEdit, EM_GETZOOM, (WPARAM)&num, (LPARAM)&den);
+    if (num <= 0 || den <= 0)
+    {
+        num = 0;
+        den = 0;
+    }
+
+    *pNum = num;
+    *pDen = den;
+}
+
+// Aplica o zoom global a um editor, se ele estiver diferente.
+void EditorApplyGlobalZoomTo(HWND hEdit)
+{
+    int num;
+    int den;
+
+    if (hEdit == NULL || !IsWindow(hEdit))
+        return;
+
+    EditorReadZoom(hEdit, &num, &den);
+    if (num == s_zoomNum && den == s_zoomDen)
+        return;
+
+    SendMessageW(hEdit, EM_SETZOOM, (WPARAM)s_zoomNum, (LPARAM)s_zoomDen);
+}
+
+// Adota o zoom de hSource como zoom global e replica nas outras abas.
+void EditorSyncZoomFrom(HWND hSource)
+{
+    size_t i;
+
+    if (hSource == NULL || !IsWindow(hSource))
+        return;
+
+    EditorReadZoom(hSource, &s_zoomNum, &s_zoomDen);
+
+    for (i = 0; i < g_documents.size(); ++i)
+    {
+        if (g_documents[i]->hEdit != hSource)
+            EditorApplyGlobalZoomTo(g_documents[i]->hEdit);
+    }
+}
+
 void EditorSetFont(HFONT hFont)
 {
     size_t i;
@@ -192,11 +280,35 @@ void EditorSetFont(HFONT hFont)
     if (hFont == NULL)
         return;
 
+    // Guarda o zoom atual (o da aba ativa) antes de mexer na fonte.
+    EditorSyncZoomFrom(g_hWndEdit);
+
     for (i = 0; i < g_documents.size(); ++i)
         SendMessageW(g_documents[i]->hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
 
+    // A fonte e o zoom valem para todas as abas, inclusive as ocultas.
+    for (i = 0; i < g_documents.size(); ++i)
+        EditorApplyGlobalZoomTo(g_documents[i]->hEdit);
+
     // A largura do tab depende da largura do espaco da fonte.
     EditorApplyTabWidth();
+
+    // O WM_SETFONT devolve o formato de caractere do texto todo ao padrao e
+    // apaga o negrito/italico do highlighting. Reinicia a varredura: a aba
+    // ativa e refeita agora e as ocultas se ajustam em DocActivate.
+    if (g_settings.codeHighlighting)
+    {
+        EditorCancelUniversalHighlight();
+
+        for (i = 0; i < g_documents.size(); ++i)
+            g_documents[i]->bCodeHighlightSynced = FALSE;
+
+        if (g_pActiveDoc != NULL)
+        {
+            EditorSyncUniversalHighlight(g_pActiveDoc);
+            EditorUpdateCurrentLineHighlight(g_pActiveDoc->hEdit);
+        }
+    }
 }
 
 // Ajusta a largura visual do caractere Tab (em N espacos da fonte atual)
@@ -445,6 +557,7 @@ void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen)
     BOOL blank = FALSE;
     BOOL caretBlank;
     BOOL found = FALSE;
+    BOOL foundForward = FALSE;
     BOOL isHeader = FALSE;
     BOOL isCloser = FALSE;
     BOOL noBlock = FALSE;
@@ -521,6 +634,7 @@ void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen)
                         anchorStart = lineStart;
                         base = indent;
                         found = TRUE;
+                        foundForward = TRUE;
                         break;
                     }
                 }
@@ -572,6 +686,22 @@ void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen)
         kind = 1;
     else if (isCloser)
         kind = 2;
+
+    // Linha vazia (sem indentacao) que herdou a ancora de uma linha vizinha:
+    // - ancora anterior que fecha um bloco (kind 2): a linha vazia vem depois
+    //   do fim do bloco, portanto nao pertence a ele;
+    // - ancora posterior que abre um bloco (kind 1): a linha vazia vem antes
+    //   do inicio do bloco, portanto tambem nao pertence a ele.
+    // Nesses casos a propria linha vazia passa a ser a ancora, no mesmo nivel
+    // da vizinha. Em nivel 0 nenhum bloco e destacado; em nivel > 0 vale o bloco
+    // pai. Uma linha vazia logo apos o cabecalho do bloco (kind 1 com ancora
+    // anterior) continua dentro dele.
+    if (caretBlank && found && (kind == 2 || (kind == 1 && foundForward)))
+    {
+        anchorPara = para;
+        anchorStart = start;
+        kind = 0;
+    }
 
     if (pDoc->bIndentBlockValid &&
         pDoc->indentBlockParaCount == (int)paraCount &&
@@ -1864,8 +1994,111 @@ static void EditorMoveActiveColors(HWND hEdit, Document* pDoc,
     SendMessageW(hEdit, EM_SETEVENTMASK, 0, oldMask);
 }
 
-// Algoritmo unificado de realce léxico universal baseado em look-behind (Com trava para números corrigida).
-// O trecho [0, applyFrom) serve apenas de contexto para o look-behind e nao recebe negrito.
+// Realce lexico universal baseado em look-behind. Tres regras, todas locais:
+//   1) palavra imediatamente antes de '(', '[' ou '{'  -> NEGRITO (o que executa/nomeia)
+//   2) palavra imediatamente antes de um '=' isolado   -> NEGRITO + ITALICO (o que e definido)
+//   3) palavra imediatamente antes de um ':' isolado   -> ITALICO (propriedade/chave, ex.: CSS)
+// O trecho [0, applyFrom) serve apenas de contexto para o look-behind e nao
+// recebe estilo.
+
+static BOOL EditorIsWordChar(wchar_t ch)
+{
+    return iswalnum(ch) || ch == L'_' || ch == L'-';
+}
+
+// Palavra imediatamente antes de pos. Pula espacos e tabs e, se skipLineBreaks,
+// tambem CR/LF. Descarta: nada antes, caractere que nao e de palavra (ex.: ") {"),
+// um '-' isolado e numeros puros ou sinalizados ("123", "-45", mas nao "meu-id-123").
+// Retorna TRUE com a palavra em [*pStart, *pEnd).
+static BOOL EditorFindWordBefore(const std::wstring& text, size_t pos, BOOL skipLineBreaks, int* pStart, int* pEnd)
+{
+    int idx;
+    int wordEnd;
+    int wordStart;
+    int digitCount = 0;
+    BOOL isPureNumber = TRUE;
+
+    if (pos == 0 || pos > text.length())
+        return FALSE;
+
+    idx = (int)pos - 1;
+    while (idx >= 0 && (text[idx] == L' ' || text[idx] == L'\t' ||
+                        (skipLineBreaks && (text[idx] == L'\r' || text[idx] == L'\n'))))
+    {
+        --idx;
+    }
+
+    if (idx < 0)
+        return FALSE;
+
+    wordEnd = idx + 1;
+    wordStart = idx;
+    while (wordStart >= 0 && EditorIsWordChar(text[wordStart]))
+        --wordStart;
+    ++wordStart;
+
+    // O caractere logo antes nao e de palavra: evita falsos positivos como ") {".
+    if (wordStart >= wordEnd)
+        return FALSE;
+
+    // Hifen isolado nao e palavra.
+    if (wordStart + 1 == wordEnd && text[wordStart] == L'-')
+        return FALSE;
+
+    // Trava de numeros: "123" e "-45" sao descartados; "meu-id-123" nao.
+    for (int k = wordStart; k < wordEnd; ++k)
+    {
+        if (iswdigit(text[k]))
+            ++digitCount;
+        else if (text[k] == L'-' && k == wordStart)
+            continue;
+        else
+        {
+            isPureNumber = FALSE;
+            break;
+        }
+    }
+    if (isPureNumber && digitCount > 0)
+        return FALSE;
+
+    *pStart = wordStart;
+    *pEnd = wordEnd;
+    return TRUE;
+}
+
+// '=' isolado = atribuicao/definicao. Fica de fora tudo em que um vizinho colado
+// o transforma em outro operador: ==, ===, !=, !==, <=, >=, <=>, =>, =~, +=, -=,
+// *=, /=, %=, &=, |=, ^=, .=, ??=, :=, <<=, >>=. O que vem depois pode ser
+// qualquer outro caractere ("x=-1", "x=!y", "x=&y" continuam sendo atribuicao).
+static BOOL EditorIsPlainAssign(const std::wstring& text, size_t i)
+{
+    wchar_t prev = (i > 0) ? text[i - 1] : 0;
+    wchar_t next = (i + 1 < text.length()) ? text[i + 1] : 0;
+
+    if (prev != 0 && wcschr(L"=!<>+-*/%&|^~?:.", prev) != NULL)
+        return FALSE;
+    if (next == L'=' || next == L'>' || next == L'~')
+        return FALSE;
+
+    return TRUE;
+}
+
+// ':' isolado = separador chave/valor ("color: red", "min-width: 600px", "nome: x").
+// Fica de fora: "::" (Foo::bar, a::before), ":=", "?:" (Elvis), ":/" e ":\\"
+// (http://, C:\\caminho). Horas como "12:30" caem na trava de numeros.
+static BOOL EditorIsPlainColon(const std::wstring& text, size_t i)
+{
+    wchar_t prev = (i > 0) ? text[i - 1] : 0;
+    wchar_t next = (i + 1 < text.length()) ? text[i + 1] : 0;
+
+    if (prev == L':' || prev == L'?')
+        return FALSE;
+    if (next == L':' || next == L'=' || next == L'/' || next == L'\\')
+        return FALSE;
+
+    return TRUE;
+}
+
 static void EditorParseAndHighlightRange(ITextDocument* pTextDoc, ITextRange* pWordRange, const std::wstring& text, long startOffset, size_t scanLen, size_t applyFrom)
 {
     if (pTextDoc == NULL || pWordRange == NULL || scanLen == 0)
@@ -1874,107 +2107,55 @@ static void EditorParseAndHighlightRange(ITextDocument* pTextDoc, ITextRange* pW
     for (size_t i = 0; i < scanLen; ++i)
     {
         wchar_t ch = text[i];
+        BOOL skipLineBreaks;
+        BOOL bold = TRUE;
+        BOOL italic = FALSE;
+        int wordStart = 0;
+        int wordEnd = 0;
 
         if (i < applyFrom)
             continue;
 
         if (ch == L'(' || ch == L'[' || ch == L'{')
         {
-            if (i == 0) continue;
+            skipLineBreaks = TRUE;   // permite "class Foo\n{" e "else\n{"
+        }
+        else if (ch == L'=' && EditorIsPlainAssign(text, i))
+        {
+            skipLineBreaks = FALSE;  // "= x" no inicio de linha nao pega a linha anterior
+            italic = TRUE;           // definicao: negrito + italico
+        }
+        else if (ch == L':' && EditorIsPlainColon(text, i))
+        {
+            skipLineBreaks = FALSE;
+            bold = FALSE;            // chave/propriedade: so italico
+            italic = TRUE;
+        }
+        else
+        {
+            continue;
+        }
 
-            int idx = (int)i - 1;
+        if (!EditorFindWordBefore(text, i, skipLineBreaks, &wordStart, &wordEnd))
+            continue;
 
-            // Ignora espaços e quebras de linha/abas para trás
-            while (idx >= 0 && (text[idx] == L' ' || text[idx] == L'\t' || text[idx] == L'\r' || text[idx] == L'\n'))
-            {
-                --idx;
-            }
+        pWordRange->SetRange(startOffset + (long)wordStart, startOffset + (long)wordEnd);
 
-            int wordEnd = idx + 1;
-            BOOL isValidWord = TRUE;
-            int wordStart = idx;
-
-            while (wordStart >= 0)
-            {
-                wchar_t wCh = text[wordStart];
-                
-                // Aceita alfanuméricos, underline E hífen no corpo da palavra
-                if (iswalnum(wCh) || wCh == L'_' || wCh == L'-')
-                {
-                    --wordStart;
-                }
-                else
-                {
-                    if (wordStart == idx)
-                        isValidWord = FALSE; // Evita falsos positivos como ") {"
-                    break;
-                }
-            }
-            ++wordStart;
-
-            // Garante que se o primeiro caractere for um hífen isolado, ignora
-            if (wordStart < wordEnd && text[wordStart] == L'-')
-            {
-                // Se a palavra for apenas um '-', ela se torna inválida
-                if (wordStart + 1 == wordEnd)
-                    isValidWord = FALSE;
-            }
-
-            // ===================================================================
-            // TRAVA PARA NÚMEROS CORRIGIDA: Verifica se é um número puro ou sinalizado
-            // ===================================================================
-            if (isValidWord && wordEnd > wordStart)
-            {
-                BOOL isPureNumber = TRUE;
-                int digitCount = 0;
-
-                for (int k = wordStart; k < wordEnd; ++k)
-                {
-                    if (iswdigit(text[k]))
-                    {
-                        ++digitCount;
-                    }
-                    else if (text[k] == L'-' && k == wordStart)
-                    {
-                        // Permite o sinal de menos apenas no exato começo do token
-                        continue;
-                    }
-                    else
-                    {
-                        // Qualquer caractere não numérico invalida a trava de número puro (ex: "meu-id-123")
-                        isPureNumber = FALSE;
-                        break;
-                    }
-                }
-                
-                // Só descarta se houver dígitos e o formato for um número válido (ex: "123" ou "-45")
-                if (isPureNumber && digitCount > 0)
-                {
-                    isValidWord = FALSE;
-                }
-            }
-            // ===================================================================
-
-            // Aplica o negrito apenas em nomes válidos (Funções, Métodos, Comandos)
-            if (isValidWord && wordEnd > wordStart)
-            {
-                long globalStart = startOffset + (long)wordStart;
-                long globalEnd = startOffset + (long)wordEnd;
-
-                pWordRange->SetRange(globalStart, globalEnd);
-                ITextFont* pFont = NULL;
-                if (SUCCEEDED(pWordRange->GetFont(&pFont)) && pFont != NULL)
-                {
-                    pFont->SetBold(tomTrue);
-                    pFont->Release();
-                }
-            }
+        ITextFont* pFont = NULL;
+        if (SUCCEEDED(pWordRange->GetFont(&pFont)) && pFont != NULL)
+        {
+            if (bold)
+                pFont->SetBold(tomTrue);
+            if (italic)
+                pFont->SetItalic(tomTrue);
+            pFont->Release();
         }
     }
 }
 
 // Executa a varredura linear minimalista na linha modificada.
-// Coloca em negrito palavras seguidas imediatamente por (, [ ou {
+// Coloca em negrito palavras seguidas imediatamente por (, [ ou {, em negrito +
+// italico as seguidas por um = isolado e so em italico as seguidas por um : isolado
 static void EditorApplyUniversalHighlight(ITextDocument* pTextDoc, long start, long end)
 {
     if (pTextDoc == NULL || end <= start)
@@ -2060,9 +2241,32 @@ void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear)
     pDoc->bCodeHighlightCleared = FALSE;
     pDoc->bCodeHighlightParaValid = FALSE;
     pDoc->bCodeHighlightTextDirty = TRUE;
+    pDoc->bCodeHighlightSynced = TRUE;
 
     if (bClear && pDoc->hEdit != NULL && IsWindow(pDoc->hEdit))
         EditorClearUniversalHighlight(pDoc->hEdit);
+
+    EditorScheduleUniversalHighlight(pDoc);
+}
+
+// Reanalisa o estado do realce de um documento que acabou de receber o foco.
+// Alternar o highlighting (Ctrl+Shift+K) so processa o documento ativo; os
+// demais ficam marcados como nao sincronizados e se ajustam aqui, quando a aba
+// volta a ficar visivel:
+//  - nao sincronizado: reinicia a varredura. Com o realce desligado limpa o
+//    negrito/italico que ficou gravado no texto; ligado, a primeira passada
+//    do timer ja limpa o texto antigo antes de realcar.
+//  - sincronizado: apenas retoma a varredura lazy, se estava incompleta.
+void EditorSyncUniversalHighlight(Document* pDoc)
+{
+    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
+        return;
+
+    if (!pDoc->bCodeHighlightSynced)
+    {
+        EditorRestartUniversalHighlight(pDoc, !g_settings.codeHighlighting);
+        return;
+    }
 
     EditorScheduleUniversalHighlight(pDoc);
 }
@@ -2233,7 +2437,31 @@ BOOL EditorProcessUniversalHighlightChunk(void)
     return TRUE;
 }
 
-// Remove todo o negrito aplicado pelo highlighting de codigo, sem entrar no
+// Zera negrito/italico do formato de quem digita. Formatar um intervalo nao
+// atualiza o formato em cache do ponto de insercao: sem isto, o texto digitado
+// depois de desligar o highlighting (ou de limpar o realce) herdaria o estilo
+// da palavra onde o cursor estava. Em selecao nao vazia, apenas repete a limpeza.
+static void EditorClearSelectionStyle(ITextDocument* pTextDoc)
+{
+    ITextSelection* pSel = NULL;
+    ITextFont* pFont = NULL;
+
+    if (pTextDoc == NULL)
+        return;
+
+    if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
+    {
+        if (SUCCEEDED(pSel->GetFont(&pFont)) && pFont != NULL)
+        {
+            pFont->SetBold(tomFalse);
+            pFont->SetItalic(tomFalse);
+            pFont->Release();
+        }
+        pSel->Release();
+    }
+}
+
+// Remove todo o negrito e italico aplicados pelo highlighting de codigo, sem entrar no
 // historico de desfazer nem marcar o documento como modificado.
 void EditorClearUniversalHighlight(HWND hEdit)
 {
@@ -2244,6 +2472,10 @@ void EditorClearUniversalHighlight(HWND hEdit)
     long textLen;
     DWORD oldMask;
     BOOL modified;
+    // WM_SETREDRAW(TRUE) em uma janela oculta faz o DefWindowProc ligar o
+    // WS_VISIBLE: o RichEdit de uma aba inativa reapareceria sobre o ativo.
+    // Em editor oculto so formatamos o texto, sem mexer em redraw/visibilidade.
+    BOOL bVisible = (GetWindowLongPtrW(hEdit, GWL_STYLE) & WS_VISIBLE) != 0;
 
     if (pDoc != NULL)
     {
@@ -2257,13 +2489,22 @@ void EditorClearUniversalHighlight(HWND hEdit)
     textLen = (long)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
     if (textLen <= 0)
     {
+        // Nao ha texto a limpar, mas o cursor pode ter ficado com negrito/italico.
+        oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+        modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
+        pTextDoc->Undo(tomSuspend, NULL);
+        EditorClearSelectionStyle(pTextDoc);
+        pTextDoc->Undo(tomResume, NULL);
+        SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
+        SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
         pTextDoc->Release();
         return;
     }
 
     oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
     modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
-    SendMessageW(hEdit, WM_SETREDRAW, FALSE, 0);
+    if (bVisible)
+        SendMessageW(hEdit, WM_SETREDRAW, FALSE, 0);
     pTextDoc->Undo(tomSuspend, NULL);
 
     if (SUCCEEDED(pTextDoc->Range(0, textLen, &pWholeRange)) && pWholeRange != NULL)
@@ -2273,18 +2514,25 @@ void EditorClearUniversalHighlight(HWND hEdit)
         if (SUCCEEDED(pWholeRange->GetFont(&pWholeFont)) && pWholeFont != NULL)
         {
             pWholeFont->SetBold(tomFalse);
+            pWholeFont->SetItalic(tomFalse);
             pWholeFont->Release();
         }
         pWholeRange->Release();
     }
+
+    // O cursor tambem precisa perder o estilo, ou o proximo texto digitado o herda.
+    EditorClearSelectionStyle(pTextDoc);
 
     pTextDoc->Undo(tomResume, NULL);
     pTextDoc->Release();
 
     SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
     SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
-    SendMessageW(hEdit, WM_SETREDRAW, TRUE, 0);
-    RedrawWindow(hEdit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+    if (bVisible)
+    {
+        SendMessageW(hEdit, WM_SETREDRAW, TRUE, 0);
+        RedrawWindow(hEdit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+    }
 }
 
 // Atualiza a linha em destaque (fundo NOTBAD_HIGHLIGHT_COLOR) e a cor do texto
@@ -2495,7 +2743,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
 
         if (!covered)
         {
-            // Limpa negritos anteriores do bloco para recalcular
+            // Limpa negrito e italico anteriores do bloco para recalcular
             ITextRange* pCleanRange = NULL;
             if (SUCCEEDED(pTextDoc->Range(hlStart, end, &pCleanRange)) && pCleanRange != NULL)
             {
@@ -2503,6 +2751,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
                 if (SUCCEEDED(pCleanRange->GetFont(&pFont)) && pFont != NULL)
                 {
                     pFont->SetBold(tomFalse);
+                    pFont->SetItalic(tomFalse);
                     pFont->Release();
                 }
                 pCleanRange->Release();

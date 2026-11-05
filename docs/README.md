@@ -1,59 +1,40 @@
-# Notbad
+# Notbad: The editor that is not bad, but exactly what you need!
 
-> **The text editor that is not bad, but exactly what you need. The perfect balance for your daily workflow.**
+## 1. NOTEPAD the inspiration
 
----
+Technology has advanced, but the original Notepad stood still in time. It never dared to try anything more "modern"; the native Windows editor never stopped being always the same. Of course, it is great for quick notes, and many people love it for that reason, but what about when we need to edit a text or review a source code with encoding?
 
-**Notbad** is a lightweight, minimalist text editor built natively for Windows (C++/Win32), heavily inspired by the classic Notepad and clean visual style of traditional Win32 text editors. Developed from the ground up using native APIs, it aims to recapture that nostalgia-inducing, lightning-fast text editing experience.
+We have great text editors, right? VSCode is a monster and offers everything we need, and there is also Notepad++, which is a strong warrior, but both end up stuffing themselves more and more with major configurations and options.
 
-While classic Notepad have paused in time and modern development environments (like VSCode and Notepad++) have become complex and heavy, Notbad proudly embraces pragmatism: delivering only the essential layout and tools you actually need, without sacrificing performance, startup speed, and lightweight efficiency.
+But it does not need to be huge to be great! We see the example of small giants like Vim or Nano. They are simple and powerful, with so many quick and necessary options. It would be great if Notepad could be like that too!
 
----
+That is the purpose of Notbad! Not to stop being Notepad, but to embed those small tools that we miss so much!
 
-## 🎯 The Philosophy: Simple and OK
+## 2. NOTBAD the objective
 
-The market is full of heavy, overly complex text editors. They often come with cluttered interfaces and an enormous footprint that legacy PCs absolutely hate. Notbad chose the path of balance:
+We know that the market is full of perfect, revolutionary, and complete editors. But all of this comes with a price, such as an excess of features with cluttered interfaces and that heaviness that some legacy PCs hate so much.
 
-* **Not as empty** as Notepad.
-* **Not as bloated** as VSCode.
+Notbad proudly embraces pragmatism and honesty in just not being bad:
+* It is not as empty as Notepad;
+* It is not as stuffed as VSCode.
 
-It is a predictable, honest tool, free of complex setting screens and instantly ready for use—whether you need to write a quick script, review source code, or just take notes.
+Just simple and okay: The exact balance for everyday life. A predictable, honest, and immediately ready-to-use tool. Perhaps to write a script, or just review a source code, or even develop software if that is the case.
 
----
+## 3. CONCEPTUAL DESIGN: turning the cover
 
-## 🎨 Conceptual Design: Turning the Cover
+The visual identity of Notbad translates its usability philosophy through its official icon:
 
-Notbad’s visual identity translates its usability philosophy through its official icon:
+* **Ready for Action:** Unlike the Notepad icon of a closed or semi-open notebook, Notbad displays a notepad with the cover fully flipped to the back. It is the ultimate symbol of agility. It means total freedom of use and zero barriers between your click and the start of typing.
+* **Discreet Evolution:** The inclusion of colored tabs on the side of the icon instantly communicates the greatest evolution Notepad has ever had. But Notbad does not intend to stop at tabs!
+* **The Substitution:** The presence of the stylized N\_ in the icon brings the underscore character after the N; the typing that follows intends to replace something!
 
-* **Ready for Action:** Unlike the traditional icon of a closed notebook, Notbad displays a notepad with its cover flipped completely to the back. It is the ultimate symbol of agility: zero barriers between your click and the start of your typing.
-* **Discrete Evolution:** The inclusion of colored tabs on the side of the icon instantly communicates the ability to work with multiple documents, without breaking the classic aesthetic.
-* **The Substitution:** The presence of the stylized `N_` introduces the underscore character after the letter N, symbolizing the blinking cursor that types to replace and evolve old editing standards.
+## 4. THE PILLARS OF THE INTERFACE
 
----
+To remain faithful to its source of inspiration, the development of Notbad follows strict interface rules:
 
-## 🚀 Key Features
-
-The project adheres to strict rules of the classic interface (Editing Window, Menu, and Status Bar), eliminating messy toolbars or buttons. Everything is within reach of the menus and shortcuts:
-
-### 📑 Advanced Tabbed Interface
-* **Multiple Documents:** Manage multiple files in a single window with native drag-and-drop tab reordering.
-* **Modification Indicator:** Files with unsaved changes display a `*` before the filename on the tab.
-* **Batch Operations:** Universal shortcut to "Save All" (`Ctrl+Alt+S`) and quick tab closure (`Ctrl+F4`).
-
-### 📂 On-Demand File Panel (TreeView)
-* **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) creates a side panel with a file tree view on demand, using the system's native icons. Toggle the panel quickly with `Ctrl+T`.
-
-### 🔢 Dynamic Line Numbers (Gutter)
-* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks.
-
-### ✍️ Intelligent Editing & Coding
-* **Advanced RichEdit Engine:** Powered by the Windows RichEdit engine, ensuring a robust, native multi-level *Undo* history per tab.
-* **Smart Indentation:** Dedicated dialog for Tab width adjustments, automatic conversion between tabs/spaces, and support for block indenting/unindenting with `Tab` / `Shift+Tab`.
-* **Line Highlight:** Option to visually highlight the current cursor line with a subtle light gray background (`Ctrl+Shift+H`).
-* **Code highlighting:** An option to visually highlight elements of source code. It uses a minimalist, universal approach applicable to all code (`Ctrl+Shift+K`).
-
-### 🔍 Advanced Modeless Search
-* **Global Scope:** A custom Find/Replace dialog that allows for refined searches and batch replacements scanning **all open files** simultaneously.
+* **Rigorously Clean:** No toolbars or cluttered buttons. Just the editing window, the classic menus, and the keyboard shortcuts.
+* **No Settings Menu:** Everything Notbad offers is within reach in its discreet menu. We understand that as soon as settings groups are allocated into a dedicated space, it will never be enough, and there will always be a desire for something more. After that, more and more.
+* **Vital and Discreet Evolutions:** Indispensable features such as a file tree view (TreeView), logical line numbering (gutter), indentation support, and current line highlighting exist to assist the user, but they act on demand, in an optional manner.
 
 ---
 

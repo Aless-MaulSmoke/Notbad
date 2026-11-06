@@ -44,7 +44,7 @@ The project adheres to strict rules of the classic interface (Editing Window, Me
 * **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) creates a side panel with a file tree view on demand, using the system's native icons. Toggle the panel quickly with `Ctrl+T`.
 
 ### 🔢 Dynamic Line Numbers (Gutter)
-* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks(`Ctrl+Shift+N`).
+* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks (`Ctrl+Shift+N`).
 
 ### ✍️ Intelligent Editing & Coding
 * **Advanced RichEdit Engine:** Powered by the Windows RichEdit engine, ensuring a robust, native multi-level *Undo* history per tab.

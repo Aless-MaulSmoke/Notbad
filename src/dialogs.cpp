@@ -34,7 +34,9 @@ static INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM 
             SendDlgItemMessageW(hDlg, IDC_ABOUT_IMAGE, STM_SETIMAGE,
                                 (WPARAM)IMAGE_BITMAP, (LPARAM)g_hAboutLogo);
         }
-        return TRUE;
+
+        SetFocus(GetDlgItem(hDlg, IDC_ABOUT_OK));
+        return FALSE;
     }
 
     case WM_DESTROY:
@@ -436,11 +438,12 @@ void DoPrint(HWND hWnd)
 
 void ShowHelp(HWND hWnd)
 {
-    WCHAR szFormat[1024];
-    WCHAR szMessage[1280];
+    HINSTANCE hResult = ShellExecuteW(hWnd, L"open", NOTBAD_HELP_URL,
+                                      NULL, NULL, SW_SHOWNORMAL);
 
-    LoadStringResource(IDS_HELP_TEXT, szFormat, ARRAYSIZE(szFormat));
-    StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat, NOTBAD_VERSION);
-
-    MessageBoxW(hWnd, szMessage, NOTBAD_NAME, MB_ICONINFORMATION | MB_OK);
+    if ((INT_PTR)hResult <= 32)
+    {
+        MessageBoxW(hWnd, NOTBAD_HELP_URL, NOTBAD_NAME,
+                    MB_ICONINFORMATION | MB_OK);
+    }
 }

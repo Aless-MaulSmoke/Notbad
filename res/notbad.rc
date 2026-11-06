@@ -131,6 +131,7 @@ BEGIN
     IDS_REPLACED_COUNT  "Replaced %d occurrence(s)."
     IDS_STATUS_AUTOINDENT "Auto-indent"
     IDS_ENC_UTF8BOM     "UTF-8 with BOM"
+    IDS_NEW_VERSION     "A new version of Notbad is available: %s\n\nYou are using version %s.\n\nOpen the download page?"
 END
 
 IDD_ABOUT DIALOGEX 0, 0, 340, 186
@@ -140,12 +141,12 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_ABOUT_IMAGE, "Static", SS_BITMAP | SS_REALSIZECONTROL, 12, 12, 64, 64
     LTEXT           "Notbad", IDC_ABOUT_NAME, 88, 14, 240, 14
-    LTEXT           "Version 1.0.5", IDC_ABOUT_VERSION, 88, 30, 240, 10
+    LTEXT           "Version 1.0.6", IDC_ABOUT_VERSION, 88, 30, 240, 10
     LTEXT           "A modern and ""notbad"" reimagining of the traditional notepad text editor, keeping the lightweight soul you love with the power features you need.", IDC_ABOUT_COPYRIGHT, 88, 48, 240, 44
     LTEXT           "Project Team:", IDC_ABOUT_TEAM_LABEL, 12, 112, 316, 10
     LTEXT           "* Aless MaulSmoke: Project Manager | Concept | Code Review", IDC_ABOUT_TEAM1, 16, 128, 312, 10
     LTEXT           "* opencode and claudecode: Core Development | Heavy Coding", IDC_ABOUT_TEAM2, 16, 140, 312, 10
-    CONTROL         "<a href=""https://github.com/Aless-MaulSmoke/Notbad"">https://github.com/Aless-MaulSmoke/Notbad</a>", IDC_ABOUT_LINK, "SysLink", WS_TABSTOP, 12, 158, 260, 10
+    CONTROL         "<a href=""https://github.com/Aless-MaulSmoke/Notbad"">https://github.com/Aless-MaulSmoke/Notbad</a>", IDC_ABOUT_LINK, "SysLink", 0, 12, 158, 260, 10
     DEFPUSHBUTTON   "OK", IDC_ABOUT_OK, 283, 158, 45, 14
 END
 
@@ -203,8 +204,8 @@ BEGIN
 END
 
 1 VERSIONINFO
- FILEVERSION 1,0,1,0
- PRODUCTVERSION 1,0,1,0
+ FILEVERSION 1,0,6,0
+ PRODUCTVERSION 1,0,6,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -217,11 +218,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Notbad"
             VALUE "FileDescription", "Notbad"
-            VALUE "FileVersion", "1.0.5.0"
+            VALUE "FileVersion", "1.0.6.0"
             VALUE "InternalName", "Notbad"
             VALUE "OriginalFilename", "Notbad.exe"
             VALUE "ProductName", "Notbad"
-            VALUE "ProductVersion", "1.0.5.0"
+            VALUE "ProductVersion", "1.0.6.0"
         END
     END
     BLOCK "VarFileInfo"

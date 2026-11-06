@@ -18,8 +18,12 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.5"
+#define NOTBAD_VERSION     L"1.0.6"
+#define NOTBAD_HELP_URL    L"https://aless-maulsmoke.github.io/Notbad/"
+#define NOTBAD_VERSION_URL L"https://aless-maulsmoke.github.io/Notbad/version.html"
+#define NOTBAD_RELEASES_URL L"https://github.com/Aless-MaulSmoke/Notbad/releases"
 #define WM_NOTBAD_CLOSETAB (WM_APP + 1)
+#define WM_NOTBAD_NEWVERSION (WM_APP + 2)
 #define NOTBAD_CODE_HIGHLIGHT_TIMER 0x4C48
 #define MAX_EDIT_BUFFER     0x7FFFFFF0u
 #define MAX_FILE_PATH       32768
@@ -127,6 +131,7 @@ BOOL InitApplication(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow, LPWSTR lpCmdLine);
 int  RunMessageLoop(void);
 void LoadStringResource(UINT id, LPWSTR buffer, int cchBuffer);
+void StartVersionCheck(HWND hWnd);
 
 // Idiomas (lang.cpp)
 void    LangInit(void);

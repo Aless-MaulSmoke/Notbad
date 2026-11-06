@@ -1710,6 +1710,129 @@ static void ToggleFileTree(void)
     UpdateEditMenuState(g_hWndMain);
 }
 
+static int TrimTrailingSpaces(LPWSTR lpText, int nLen)
+{
+    while (nLen > 0 && lpText[nLen - 1] == L' ')
+        --nLen;
+
+    return nLen;
+}
+
+// Alarga um menu popup anexando espacos ao item mais largo. A largura natural
+// do popup e estimada pela largura do texto mais a margem do tema; os espacos
+// extras fazem o menu crescer sem alterar o visual dos demais itens.
+static void WidenMenuByPercent(HMENU hMenu, int nPercent)
+{
+    HDC hdc;
+    HGDIOBJ hOldFont;
+    SIZE spaceSize = {};
+    SIZE labelSize;
+    SIZE accelSize;
+    WCHAR szText[512];
+    WCHAR szNew[1024];
+    WCHAR* pTab;
+    int count;
+    int i;
+    int len;
+    int labelLen;
+    int accelLen;
+    int maxRow = 0;
+    int maxItem = -1;
+    int menuHeight;
+    int margin;
+    int extra;
+    int spaces;
+
+    if (hMenu == NULL || nPercent <= 0)
+        return;
+
+    count = GetMenuItemCount(hMenu);
+    if (count <= 0)
+        return;
+
+    hdc = GetDC(NULL);
+    if (hdc == NULL)
+        return;
+
+    hOldFont = SelectObject(hdc, g_hFontMenu != NULL ? (HGDIOBJ)g_hFontMenu
+                                                    : GetStockObject(DEFAULT_GUI_FONT));
+    GetTextExtentPoint32W(hdc, L" ", 1, &spaceSize);
+
+    for (i = 0; i < count; ++i)
+    {
+        len = GetMenuStringW(hMenu, (UINT)i, szText, ARRAYSIZE(szText), MF_BYPOSITION);
+        if (len <= 0)
+            continue;
+
+        pTab = wcschr(szText, L'\t');
+        labelLen = pTab != NULL ? (int)(pTab - szText) : len;
+        accelLen = pTab != NULL ? len - labelLen - 1 : 0;
+        labelLen = TrimTrailingSpaces(szText, labelLen);
+
+        labelSize.cx = 0;
+        accelSize.cx = 0;
+        if (labelLen > 0)
+            GetTextExtentPoint32W(hdc, szText, labelLen, &labelSize);
+        if (accelLen > 0)
+            GetTextExtentPoint32W(hdc, pTab + 1, accelLen, &accelSize);
+
+        if (labelSize.cx + accelSize.cx > maxRow)
+        {
+            maxRow = labelSize.cx + accelSize.cx;
+            maxItem = i;
+        }
+    }
+
+    SelectObject(hdc, hOldFont);
+    ReleaseDC(NULL, hdc);
+
+    if (maxItem < 0 || spaceSize.cx <= 0)
+        return;
+
+    menuHeight = GetSystemMetrics(SM_CYMENU);
+    margin = (menuHeight * 31) / 10;
+    extra = ((maxRow + margin) * nPercent) / 100;
+    spaces = (extra + spaceSize.cx - 1) / spaceSize.cx;
+    if (spaces <= 0 || spaces > 256)
+        return;
+
+    len = GetMenuStringW(hMenu, (UINT)maxItem, szText, ARRAYSIZE(szText), MF_BYPOSITION);
+    if (len <= 0)
+        return;
+
+    pTab = wcschr(szText, L'\t');
+    labelLen = pTab != NULL ? (int)(pTab - szText) : len;
+    labelLen = TrimTrailingSpaces(szText, labelLen);
+
+    if (spaces + len >= (int)ARRAYSIZE(szNew))
+        return;
+
+    memcpy(szNew, szText, (size_t)labelLen * sizeof(WCHAR));
+    for (i = 0; i < spaces; ++i)
+        szNew[labelLen + i] = L' ';
+
+    if (pTab != NULL)
+    {
+        int tailLen = len - labelLen;
+
+        memcpy(szNew + labelLen + spaces, pTab, (size_t)tailLen * sizeof(WCHAR));
+        szNew[labelLen + spaces + tailLen] = L'\0';
+    }
+    else
+    {
+        szNew[labelLen + spaces] = L'\0';
+    }
+
+    {
+        MENUITEMINFOW mii = {};
+
+        mii.cbSize = sizeof(mii);
+        mii.fMask = MIIM_STRING;
+        mii.dwTypeData = szNew;
+        SetMenuItemInfoW(hMenu, (UINT)maxItem, TRUE, &mii);
+    }
+}
+
 BOOL CreateNotbadWindow(HINSTANCE hInstance, int nCmdShow, LPCWSTR lpFilePath)
 {
     int x = CW_USEDEFAULT;
@@ -1736,6 +1859,10 @@ BOOL CreateNotbadWindow(HINSTANCE hInstance, int nCmdShow, LPCWSTR lpFilePath)
 
     g_hMenu = GetMenu(g_hWndMain);
     LangApplyMenu(g_hWndMain);
+
+    // O menu Format costuma ficar estreito demais para traducoes longas.
+    WidenMenuByPercent(GetSubMenu(g_hMenu, 2), 50);
+    DrawMenuBar(g_hWndMain);
 
     ShowWindow(g_hWndMain, nCmdShow);
 
@@ -2086,6 +2213,31 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         g_tabHotClose = -1;
         if (index >= 0 && index < (int)g_documents.size())
             DocClose(g_documents[index]);
+        return 0;
+    }
+
+    case WM_NOTBAD_NEWVERSION:
+    {
+        LPWSTR lpRemote = (LPWSTR)lParam;
+
+        if (lpRemote != NULL)
+        {
+            WCHAR szFormat[512];
+            WCHAR szMessage[640];
+
+            LoadStringResource(IDS_NEW_VERSION, szFormat, ARRAYSIZE(szFormat));
+            StringCchPrintfW(szMessage, ARRAYSIZE(szMessage), szFormat,
+                             lpRemote, NOTBAD_VERSION);
+
+            if (MessageBoxW(hWnd, szMessage, NOTBAD_NAME,
+                            MB_ICONINFORMATION | MB_YESNO) == IDYES)
+            {
+                ShellExecuteW(hWnd, L"open", NOTBAD_RELEASES_URL,
+                              NULL, NULL, SW_SHOWNORMAL);
+            }
+
+            LocalFree(lpRemote);
+        }
         return 0;
     }
 

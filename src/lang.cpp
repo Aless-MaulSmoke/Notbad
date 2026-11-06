@@ -71,7 +71,8 @@ static const LangIdEntry s_idsTable[] =
     NB_IDS(IDS_FIND_NOT_FOUND),
     NB_IDS(IDS_REPLACED_COUNT),
     NB_IDS(IDS_STATUS_AUTOINDENT),
-    NB_IDS(IDS_ENC_UTF8BOM)
+    NB_IDS(IDS_ENC_UTF8BOM),
+    NB_IDS(IDS_NEW_VERSION)
 };
 
 // Itens de menu: o comando (ID) e a chave do texto, que inclui o "\tCtrl+X".

@@ -126,3 +126,4 @@
 #define IDS_REPLACED_COUNT          0x2015
 #define IDS_STATUS_AUTOINDENT       0x2016
 #define IDS_ENC_UTF8BOM             0x2017
+#define IDS_NEW_VERSION             0x2018

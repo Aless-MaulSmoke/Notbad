@@ -1,5 +1,24 @@
 # CHANGELOG IN STEPS
 
+## v1.0.6 - 11/06/2026
+
+### FIXES
+
+#### Help Menu
+* **View Help:** The Help > View Help option now opens the Notabad manual from the project website in the default browser.
+* **About Link Box:** Removed the focus rectangle around the GitHub link in the About dialog by taking the SysLink out of the tab order and moving the initial focus to OK.
+
+#### Format Menu
+* **Popup Width:** Increased the Format popup menu width by about 50% so long localized labels (e.g. "Quebra Automática de linha") fit comfortably.
+
+### IMPLEMENTATIONS
+
+#### Version Check
+* **Update Check on Startup:** When starting, the background service checks if a new version of notbad is available. When the version obtained is different, Notbad shows a warning with both versions and offers the option to open the project page to download a new update. Network failures remain silent and never block startup.
+
+---
+
+
 ## v1.0.5 - 11/06/2026
 
 ### FIXES

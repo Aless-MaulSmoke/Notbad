@@ -1,6 +1,6 @@
 # CHANGELOG IN STEPS
 
-## v1.0.5
+## v1.0.5 - 11/06/2026
 
 ### FIXES
 
@@ -26,7 +26,7 @@
 ---
 
 
-## v1.0.4
+## v1.0.4 - 11/05/2026
 
 ### FIXES
 
@@ -64,7 +64,7 @@
 ---
 
 
-## v1.0.3 — Completed on 11/04/2026
+## v1.0.3 - 11/04/2026
 
 ### FIXES
 
@@ -88,7 +88,7 @@
 ---
 
 
-## v1.0.2 — Completed on 11/03/2026
+## v1.0.2 - 11/03/2026
 
 ### FIXES
 
@@ -125,7 +125,7 @@
 ---
 
 
-## v1.0.1 — Completed on 11/01/2026
+## v1.0.1 - 11/01/2026
 
 ### IMPLEMENTATIONS
 * **Multi-Document Support:** Migration to multiple documents with tabs and RichEdit.

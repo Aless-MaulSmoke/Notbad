@@ -101,5 +101,6 @@
   "IDS_FIND_NOT_FOUND": "\"%s\" konnte nicht gefunden werden.",
   "IDS_REPLACED_COUNT": "%d Vorkommen ersetzt.",
   "IDS_STATUS_AUTOINDENT": "Auto-Einzug",
-  "IDS_ENC_UTF8BOM": "UTF-8 mit BOM"
+  "IDS_ENC_UTF8BOM": "UTF-8 mit BOM",
+  "IDS_NEW_VERSION": "Eine neue Version von Notbad ist verfügbar: %s\n\nSie verwenden Version %s.\n\nMöchten Sie die Download-Seite öffnen?"
 }

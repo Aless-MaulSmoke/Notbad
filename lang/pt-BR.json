@@ -101,5 +101,6 @@
   "IDS_FIND_NOT_FOUND": "Não foi possível encontrar \"%s\".",
   "IDS_REPLACED_COUNT": "%d ocorrência(s) substituída(s).",
   "IDS_STATUS_AUTOINDENT": "Indent. auto",
-  "IDS_ENC_UTF8BOM": "UTF-8 com BOM"
+  "IDS_ENC_UTF8BOM": "UTF-8 com BOM",
+  "IDS_NEW_VERSION": "Uma nova versão do Notbad está disponível: %s\n\nVocê está usando a versão %s.\n\nDeseja abrir a página de download?"
 }

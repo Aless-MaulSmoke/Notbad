@@ -268,6 +268,8 @@ void EditorSyncZoomFrom(HWND hSource)
 
     for (i = 0; i < g_documents.size(); ++i)
     {
+        g_documents[i]->bCodeHighlightViewValid = FALSE;
+
         if (g_documents[i]->hEdit != hSource)
             EditorApplyGlobalZoomTo(g_documents[i]->hEdit);
     }
@@ -1256,7 +1258,7 @@ void EditorUpdateCaretShape(HWND hEdit)
         return;
 
     // COMENTADO OU REMOVIDO: Este IF impedia o cursor de ser reaplicado 
-    // quando você digitava letras seguidas de mesmo tamanho físico.
+    // quando vocÃª digitava letras seguidas de mesmo tamanho fÃ­sico.
     /*
     if (s_hCaretOwner == hEdit && s_caretWidth == width && s_caretHeight == height)
         return;
@@ -1466,6 +1468,12 @@ static BOOL EditorHandleEnter(HWND hEdit)
     // estivesse desligada: o RichEdit troca a selecao por uma quebra de
     // linha simples e o cursor nao e posicionado em indentacao.
     if (start != end)
+        return FALSE;
+
+    // Cursor no inicio absoluto do paragrafo (coluna 0): o Enter so empurra a
+    // linha para baixo, sem buscar indentacao, e o cursor fica no inicio da
+    // linha seguinte. Vale o paragrafo logico, nao a linha visual do Word Wrap.
+    if (start == EditorGetParagraphStart(hEdit, start))
         return FALSE;
 
     line = (int)SendMessageW(hEdit, EM_LINEFROMCHAR, start, 0);
@@ -2173,7 +2181,7 @@ static void EditorApplyUniversalHighlight(ITextDocument* pTextDoc, long start, l
         ITextRange* pWordRange = NULL;
         if (SUCCEEDED(pTextDoc->Range(0, 0, &pWordRange)) && pWordRange != NULL)
         {
-            // Executa exatamente a mesma lógica, limitada ao escopo da linha atual
+            // Executa exatamente a mesma lÃ³gica, limitada ao escopo da linha atual
             EditorParseAndHighlightRange(pTextDoc, pWordRange, text, start, text.length(), 0);
             pWordRange->Release();
         }
@@ -2183,19 +2191,17 @@ static void EditorApplyUniversalHighlight(ITextDocument* pTextDoc, long start, l
 }
 
 // ---------------------------------------------------------------------------
-// Highlighting lazy/paginado do arquivo inteiro.
-//
-// O texto e processado em blocos (paginas) pelo timer da janela principal, em
-// vez de varrer o arquivo todo de uma vez e congelar a interface. Cada bloco
-// traz um pequeno contexto anterior para o look-behind nao perder palavras que
-// comecem antes do limite da pagina.
+// Highlighting por viewport: apenas a area visivel + margem e formatada ou
+// limpa. O resto do documento e tratado quando entrar na tela.
 // ---------------------------------------------------------------------------
-#define CODE_HIGHLIGHT_CHUNK      8192
-#define CODE_HIGHLIGHT_CONTEXT    1024
-#define CODE_HIGHLIGHT_ALIGN_MAX  512
-#define CODE_HIGHLIGHT_TIMER_MS   15
+#define CODE_HIGHLIGHT_CHUNK_LINES   200
+#define CODE_HIGHLIGHT_TIMER_MS      40
 
 static Document* s_pCodeHighlightDoc = NULL;
+
+static void EditorClearSelectionStyle(ITextDocument* pTextDoc);
+static void EditorRefreshInsertionPoint(HWND hEdit, int caret);
+static BOOL EditorApplyViewportHighlight(Document* pDoc);
 
 void EditorCancelUniversalHighlightFor(Document* pDoc)
 {
@@ -2217,11 +2223,14 @@ void EditorCancelUniversalHighlight(void)
 
 void EditorScheduleUniversalHighlight(Document* pDoc)
 {
-    if (!g_settings.codeHighlighting || pDoc == NULL || pDoc->hEdit == NULL ||
-        !IsWindow(pDoc->hEdit) || pDoc->bCodeHighlightDone)
-    {
+    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
         return;
-    }
+
+    if (pDoc != g_pActiveDoc)
+        return;
+
+    if (!g_settings.codeHighlighting && !pDoc->bCodeHighlightNeedsClean)
+        return;
 
     s_pCodeHighlightDoc = pDoc;
 
@@ -2236,15 +2245,13 @@ void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear)
 
     EditorCancelUniversalHighlightFor(pDoc);
 
-    pDoc->codeHighlightNext = 0;
-    pDoc->bCodeHighlightDone = FALSE;
-    pDoc->bCodeHighlightCleared = FALSE;
     pDoc->bCodeHighlightParaValid = FALSE;
     pDoc->bCodeHighlightTextDirty = TRUE;
+    pDoc->bCodeHighlightViewValid = FALSE;
     pDoc->bCodeHighlightSynced = TRUE;
 
-    if (bClear && pDoc->hEdit != NULL && IsWindow(pDoc->hEdit))
-        EditorClearUniversalHighlight(pDoc->hEdit);
+    if (bClear || !g_settings.codeHighlighting)
+        pDoc->bCodeHighlightNeedsClean = TRUE;
 
     EditorScheduleUniversalHighlight(pDoc);
 }
@@ -2252,11 +2259,7 @@ void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear)
 // Reanalisa o estado do realce de um documento que acabou de receber o foco.
 // Alternar o highlighting (Ctrl+Shift+K) so processa o documento ativo; os
 // demais ficam marcados como nao sincronizados e se ajustam aqui, quando a aba
-// volta a ficar visivel:
-//  - nao sincronizado: reinicia a varredura. Com o realce desligado limpa o
-//    negrito/italico que ficou gravado no texto; ligado, a primeira passada
-//    do timer ja limpa o texto antigo antes de realcar.
-//  - sincronizado: apenas retoma a varredura lazy, se estava incompleta.
+// volta a ficar visivel.
 void EditorSyncUniversalHighlight(Document* pDoc)
 {
     if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
@@ -2273,168 +2276,254 @@ void EditorSyncUniversalHighlight(Document* pDoc)
 
 void EditorInvalidateUniversalHighlight(Document* pDoc)
 {
-    if (!g_settings.codeHighlighting || pDoc == NULL)
+    if (pDoc == NULL)
         return;
 
-    // A edicao invalida o trecho realcado da linha atual; ele sera limpo e
-    // recalculado por EditorUpdateCurrentLineHighlight.
+    // A edicao invalida o trecho realcado da linha atual; ela e recalculada
+    // imediatamente por EditorUpdateCurrentLineHighlight, que tambem limpa o
+    // flag de sujeira. O bloco visivel so e refeito se o texto realmente sair
+    // da faixa ja processada (ex.: colar/apagar varias linhas).
     pDoc->bCodeHighlightTextDirty = TRUE;
 
-    // Depois da primeira passada completa o formato acompanha as edicoes; a
-    // linha/paragrafo alterado e recalculado pelo destaque da linha atual.
-    if (pDoc->bCodeHighlightDone)
+    if (!g_settings.codeHighlighting)
         return;
 
-    // Reinicia a varredura sem limpar o documento inteiro: limpar a cada
-    // tecla durante a primeira passada causava tremor e travamento na edicao.
-    pDoc->codeHighlightNext = 0;
     EditorScheduleUniversalHighlight(pDoc);
 }
 
-// Processa um bloco. Retorna TRUE enquanto ainda houver texto a varrer.
-BOOL EditorProcessUniversalHighlightChunk(void)
+static BOOL EditorGetViewportRange(HWND hEdit, int* pVisibleStart, int* pVisibleEnd,
+                                   int* pStart, int* pEnd)
 {
-    Document* pDoc = s_pCodeHighlightDoc;
-    ITextDocument* pTextDoc;
-    ITextRange* pRange = NULL;
-    ITextRange* pWordRange = NULL;
-    BSTR bstrText = NULL;
+    RECT rc;
+    POINT pt;
     GETTEXTLENGTHEX gtl = { GTL_DEFAULT | GTL_NUMCHARS, 1200 };
-    long textLen;
-    long start;
-    long end;
-    long ctxStart;
-    DWORD oldMask;
-    BOOL modified;
+    int textLen;
+    int first;
+    int last;
+    int visStart;
+    int visEnd;
+    int start;
+    int end;
+    IRichEditOle* pOle = NULL;
+    ITextDocument* pTextDoc = NULL;
+    ITextRange* pRange = NULL;
 
-    if (!g_settings.codeHighlighting)
+    if (hEdit == NULL || pVisibleStart == NULL || pVisibleEnd == NULL ||
+        pStart == NULL || pEnd == NULL)
     {
-        EditorCancelUniversalHighlight();
         return FALSE;
     }
 
-    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
-    {
-        s_pCodeHighlightDoc = NULL;
-        return FALSE;
-    }
+    *pVisibleStart = 0;
+    *pVisibleEnd = 0;
+    *pStart = 0;
+    *pEnd = 0;
 
-    if (pDoc->bCodeHighlightDone)
-    {
-        s_pCodeHighlightDoc = NULL;
-        return FALSE;
-    }
-
-    textLen = (long)SendMessageW(pDoc->hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
-
+    textLen = (int)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
     if (textLen <= 0)
-    {
-        s_pCodeHighlightDoc = NULL;
         return FALSE;
-    }
 
-    if (pDoc->codeHighlightNext >= textLen)
-    {
-        pDoc->bCodeHighlightDone = TRUE;
-        s_pCodeHighlightDoc = NULL;
+    SendMessageW(hEdit, EM_GETRECT, 0, (LPARAM)&rc);
+    if (rc.right <= rc.left || rc.bottom <= rc.top)
         return FALSE;
-    }
 
-    if (!pDoc->bCodeHighlightCleared)
+    pt.x = rc.left;
+    pt.y = rc.top;
+    first = (int)SendMessageW(hEdit, EM_CHARFROMPOS, 0, (LPARAM)&pt);
+    if (first < 0 || first > textLen)
+        first = 0;
+
+    pt.x = rc.right - 1;
+    pt.y = rc.bottom - 1;
+    last = (int)SendMessageW(hEdit, EM_CHARFROMPOS, 0, (LPARAM)&pt);
+    if (last < 0 || last >= textLen)
+        last = textLen - 1;
+    if (last < first)
+        last = first;
+
+    visStart = first;
+    visEnd = last + 1;
+    start = visStart;
+    end = visEnd;
+
+    if (SendMessageW(hEdit, EM_GETOLEINTERFACE, 0, (LPARAM)&pOle) && pOle != NULL)
     {
-        EditorClearUniversalHighlight(pDoc->hEdit);
-        pDoc->bCodeHighlightCleared = TRUE;
+        if (SUCCEEDED(pOle->QueryInterface(__uuidof(ITextDocument), (void**)&pTextDoc)) &&
+            pTextDoc != NULL)
+        {
+            long value = 0;
+            long moved = 0;
+
+            if (SUCCEEDED(pTextDoc->Range(first, first, &pRange)) && pRange != NULL)
+            {
+                if (SUCCEEDED(pRange->Move(tomLine, -CODE_HIGHLIGHT_CHUNK_LINES, &moved)) &&
+                    SUCCEEDED(pRange->StartOf(tomParagraph, 0, &moved)))
+                {
+                    pRange->GetStart(&value);
+                    if (value >= 0 && value <= first)
+                        start = (int)value;
+                }
+                pRange->Release();
+                pRange = NULL;
+            }
+
+            if (SUCCEEDED(pTextDoc->Range(last, last, &pRange)) && pRange != NULL)
+            {
+                moved = 0;
+                value = 0;
+                if (SUCCEEDED(pRange->Move(tomLine, CODE_HIGHLIGHT_CHUNK_LINES, &moved)) &&
+                    SUCCEEDED(pRange->EndOf(tomParagraph, 0, &moved)))
+                {
+                    pRange->GetEnd(&value);
+                    if (value > last && value <= textLen + 1)
+                        end = (int)value;
+                }
+                pRange->Release();
+            }
+
+            pTextDoc->Release();
+        }
+        pOle->Release();
     }
 
-    start = pDoc->codeHighlightNext;
     if (start < 0)
         start = 0;
+    if (end > textLen + 1)
+        end = textLen + 1;
+    if (end <= start)
+        end = start + 1;
 
-    end = start + CODE_HIGHLIGHT_CHUNK;
-    if (end > textLen)
-        end = textLen;
+    *pVisibleStart = visStart;
+    *pVisibleEnd = visEnd;
+    *pStart = start;
+    *pEnd = end;
+    return TRUE;
+}
 
-    ctxStart = start - CODE_HIGHLIGHT_CONTEXT;
-    if (ctxStart < 0)
-        ctxStart = 0;
+static void EditorClearRangeStyle(ITextDocument* pTextDoc, int start, int end)
+{
+    ITextRange* pRange = NULL;
+
+    if (pTextDoc == NULL || end <= start)
+        return;
+
+    if (SUCCEEDED(pTextDoc->Range(start, end, &pRange)) && pRange != NULL)
+    {
+        ITextFont* pFont = NULL;
+
+        if (SUCCEEDED(pRange->GetFont(&pFont)) && pFont != NULL)
+        {
+            pFont->SetBold(tomFalse);
+            pFont->SetItalic(tomFalse);
+            pFont->Release();
+        }
+        pRange->Release();
+    }
+}
+
+static BOOL EditorApplyViewportHighlight(Document* pDoc)
+{
+    int visStart;
+    int visEnd;
+    int start;
+    int end;
+    ITextDocument* pTextDoc;
+    DWORD oldMask;
+    BOOL modified;
+    BOOL bVisible;
+    BOOL wasDirty;
+    int selStart;
+    int selEnd;
+
+    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
+        return FALSE;
+
+    if (!EditorGetViewportRange(pDoc->hEdit, &visStart, &visEnd, &start, &end))
+        return FALSE;
+
+    // Enquanto a tela continuar dentro do bloco ja processado, nada a refazer:
+    // rolar de pouco em pouco nao pode reaplicar o realce a cada passo.
+    if (pDoc->bCodeHighlightViewValid &&
+        visStart >= pDoc->codeHighlightViewStart &&
+        visEnd <= pDoc->codeHighlightViewEnd &&
+        !pDoc->bCodeHighlightTextDirty)
+    {
+        return FALSE;
+    }
 
     pTextDoc = EditorGetTextDocument(pDoc->hEdit);
     if (pTextDoc == NULL)
-    {
-        s_pCodeHighlightDoc = NULL;
         return FALSE;
-    }
+
+    wasDirty = pDoc->bCodeHighlightTextDirty;
+
+    bVisible = (GetWindowLongPtrW(pDoc->hEdit, GWL_STYLE) & WS_VISIBLE) != 0;
 
     oldMask = (DWORD)SendMessageW(pDoc->hEdit, EM_SETEVENTMASK, 0, 0);
     modified = (BOOL)SendMessageW(pDoc->hEdit, EM_GETMODIFY, 0, 0);
+    if (bVisible)
+        SendMessageW(pDoc->hEdit, WM_SETREDRAW, FALSE, 0);
     pTextDoc->Undo(tomSuspend, NULL);
 
-    if (SUCCEEDED(pTextDoc->Range(ctxStart, end, &pRange)) && pRange != NULL &&
-        SUCCEEDED(pRange->GetText(&bstrText)) && bstrText != NULL)
+    EditorClearRangeStyle(pTextDoc, start, end);
+    if (g_settings.codeHighlighting)
+        EditorApplyUniversalHighlight(pTextDoc, start, end);
+
+    GetEditSelection(pDoc->hEdit, &selStart, &selEnd);
+
+    // Com selecao ativa, limpar o formato da selecao apagaria o realce que
+    // acabou de ser reaplicado no bloco selecionado (ex.: Tab em bloco).
+    if (selEnd <= selStart)
+        EditorClearSelectionStyle(pTextDoc);
+
+    // Ao desligar o highlighting o texto visivel volta ao normal, mas o RichEdit
+    // mantem o formato em cache e o desenho do caret do ponto de insercao. Refaz
+    // a partir do vizinho ja limpo para o cursor nao continuar italico.
+    if (!g_settings.codeHighlighting && wasDirty &&
+        selEnd <= selStart && selStart >= start && selStart <= end)
     {
-        std::wstring text(bstrText);
-        size_t applyFrom = (size_t)(start - ctxStart);
-        size_t scanLen = text.length();
-
-        // Recua o fim do bloco ate a ultima separacao (espaco/quebra/tab)
-        // dentro de um limite, para nao cortar um token no meio. Assim o
-        // proximo bloco sempre comeca em uma fronteira limpa.
-        if (end < textLen && scanLen > applyFrom)
-        {
-            size_t keep = scanLen;
-            size_t minKeep = (keep > CODE_HIGHLIGHT_ALIGN_MAX)
-                                 ? keep - CODE_HIGHLIGHT_ALIGN_MAX : 0;
-
-            if (minKeep < applyFrom)
-                minKeep = applyFrom;
-
-            while (keep > minKeep && !iswspace(text[keep - 1]))
-                --keep;
-
-            if (keep > applyFrom && keep < scanLen && iswspace(text[keep - 1]))
-            {
-                long alignedEnd = ctxStart + (long)keep;
-                if (alignedEnd > start)
-                    end = alignedEnd;
-            }
-        }
-
-        scanLen = (size_t)(end - ctxStart);
-        if (scanLen > text.length())
-            scanLen = text.length();
-
-        if (scanLen > applyFrom)
-        {
-            if (SUCCEEDED(pTextDoc->Range(0, 0, &pWordRange)) && pWordRange != NULL)
-            {
-                EditorParseAndHighlightRange(pTextDoc, pWordRange, text, ctxStart,
-                                             scanLen, applyFrom);
-                pWordRange->Release();
-            }
-        }
+        EditorRefreshInsertionPoint(pDoc->hEdit, selStart);
     }
-
-    if (bstrText != NULL)
-        SysFreeString(bstrText);
-    if (pRange != NULL)
-        pRange->Release();
 
     pTextDoc->Undo(tomResume, NULL);
     pTextDoc->Release();
 
     SendMessageW(pDoc->hEdit, EM_SETMODIFY, modified, 0);
     SendMessageW(pDoc->hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
-
-    pDoc->codeHighlightNext = end;
-
-    if (end >= textLen)
+    if (bVisible)
     {
-        pDoc->bCodeHighlightDone = TRUE;
-        s_pCodeHighlightDoc = NULL;
-        return FALSE;
+        SendMessageW(pDoc->hEdit, WM_SETREDRAW, TRUE, 0);
+        RedrawWindow(pDoc->hEdit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME);
     }
 
+    pDoc->codeHighlightViewStart = start;
+    pDoc->codeHighlightViewEnd = end;
+    pDoc->bCodeHighlightViewValid = TRUE;
+    pDoc->bCodeHighlightTextDirty = FALSE;
+    pDoc->bCodeHighlightParaValid = FALSE;
+
     return TRUE;
+}
+
+BOOL EditorProcessViewportHighlight(void)
+{
+    Document* pDoc = s_pCodeHighlightDoc;
+
+    s_pCodeHighlightDoc = NULL;
+    if (g_hWndMain != NULL)
+        KillTimer(g_hWndMain, NOTBAD_CODE_HIGHLIGHT_TIMER);
+
+    if (pDoc == NULL || pDoc->hEdit == NULL || !IsWindow(pDoc->hEdit))
+        return FALSE;
+
+    if (pDoc != g_pActiveDoc)
+        return FALSE;
+
+    if (!g_settings.codeHighlighting && !pDoc->bCodeHighlightNeedsClean)
+        return FALSE;
+
+    EditorApplyViewportHighlight(pDoc);
+    return FALSE;
 }
 
 // Zera negrito/italico do formato de quem digita. Formatar um intervalo nao
@@ -2461,78 +2550,78 @@ static void EditorClearSelectionStyle(ITextDocument* pTextDoc)
     }
 }
 
-// Remove todo o negrito e italico aplicados pelo highlighting de codigo, sem entrar no
-// historico de desfazer nem marcar o documento como modificado.
-void EditorClearUniversalHighlight(HWND hEdit)
+// Faz o RichEdit refazer o ponto de insercao: formato de quem digita e o
+// desenho do caret. No modo Insert o caret e o do proprio RichEdit, que o
+// desenha inclinado quando o formato do ponto de insercao e italico, e esse
+// desenho so e refeito numa mudanca REAL de selecao (mudar o formato por TOM
+// nao basta). Seleciona o caractere vizinho e volta ao mesmo ponto: o formato
+// passa a vir do vizinho, que o realce ja deixou correto. O chamador mantem o
+// EN_CHANGE/EN_SELCHANGE desligado, entao nada alem do RichEdit enxerga a
+// selecao intermediaria.
+static void EditorRefreshInsertionPoint(HWND hEdit, int caret)
 {
-    Document* pDoc = DocFromEdit(hEdit);
-    ITextDocument* pTextDoc = EditorGetTextDocument(hEdit);
-    GETTEXTLENGTHEX gtl = { GTL_DEFAULT | GTL_NUMCHARS, 1200 };
-    ITextRange* pWholeRange = NULL;
-    long textLen;
+    GETTEXTLENGTHEX gtl = {};
+    int textLen;
+
+    gtl.flags = GTL_DEFAULT | GTL_NUMCHARS;
+    gtl.codepage = 1200;
+    textLen = (int)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+    if (textLen <= 0)
+        return;
+
+    if (caret > 0)
+        SendMessageW(hEdit, EM_SETSEL, (WPARAM)(caret - 1), (LPARAM)caret);
+    else
+        SendMessageW(hEdit, EM_SETSEL, (WPARAM)caret, (LPARAM)(caret + 1));
+
+    SendMessageW(hEdit, EM_SETSEL, (WPARAM)caret, (LPARAM)caret);
+}
+
+// Devolve o ponto de insercao ao estado certo depois de uma edicao que apagou
+// texto (Delete/Backspace). O realce (EN_CHANGE) reformata o texto vizinho,
+// mas isso nao atualiza o formato em cache do ponto de insercao nem o desenho
+// do caret: sem esta chamada o cursor continuava italico mesmo sem a palavra
+// realcada. O subclass a chama quando o RichEdit ja terminou a tecla. So com
+// realce ligado e selecao vazia; nao entra no historico de desfazer nem marca
+// o documento como modificado.
+void EditorResetCaretStyle(HWND hEdit)
+{
+    Document* pDoc;
+    ITextDocument* pTextDoc;
+    int selStart;
+    int selEnd;
     DWORD oldMask;
     BOOL modified;
-    // WM_SETREDRAW(TRUE) em uma janela oculta faz o DefWindowProc ligar o
-    // WS_VISIBLE: o RichEdit de uma aba inativa reapareceria sobre o ativo.
-    // Em editor oculto so formatamos o texto, sem mexer em redraw/visibilidade.
-    BOOL bVisible = (GetWindowLongPtrW(hEdit, GWL_STYLE) & WS_VISIBLE) != 0;
 
-    if (pDoc != NULL)
-    {
-        pDoc->bCodeHighlightParaValid = FALSE;
-        pDoc->bCodeHighlightTextDirty = TRUE;
-    }
+    if (hEdit == NULL || !g_settings.codeHighlighting)
+        return;
 
+    GetEditSelection(hEdit, &selStart, &selEnd);
+    if (selEnd > selStart)
+        return;
+
+    pTextDoc = EditorGetTextDocument(hEdit);
     if (pTextDoc == NULL)
         return;
 
-    textLen = (long)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
-    if (textLen <= 0)
-    {
-        // Nao ha texto a limpar, mas o cursor pode ter ficado com negrito/italico.
-        oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
-        modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
-        pTextDoc->Undo(tomSuspend, NULL);
-        EditorClearSelectionStyle(pTextDoc);
-        pTextDoc->Undo(tomResume, NULL);
-        SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
-        SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
-        pTextDoc->Release();
-        return;
-    }
+    pDoc = DocFromEdit(hEdit);
 
     oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
     modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
-    if (bVisible)
-        SendMessageW(hEdit, WM_SETREDRAW, FALSE, 0);
     pTextDoc->Undo(tomSuspend, NULL);
 
-    if (SUCCEEDED(pTextDoc->Range(0, textLen, &pWholeRange)) && pWholeRange != NULL)
-    {
-        ITextFont* pWholeFont = NULL;
-
-        if (SUCCEEDED(pWholeRange->GetFont(&pWholeFont)) && pWholeFont != NULL)
-        {
-            pWholeFont->SetBold(tomFalse);
-            pWholeFont->SetItalic(tomFalse);
-            pWholeFont->Release();
-        }
-        pWholeRange->Release();
-    }
-
-    // O cursor tambem precisa perder o estilo, ou o proximo texto digitado o herda.
+    // Formato de quem digita: nunca herda o realce da palavra que foi apagada.
     EditorClearSelectionStyle(pTextDoc);
+
+    // Caret do RichEdit (modo Insert): refaz o formato e o desenho a partir do
+    // texto vizinho. No Overwrite o caret e o nosso (EditorUpdateCaretShape).
+    if (pDoc == NULL || !pDoc->bOverwrite)
+        EditorRefreshInsertionPoint(hEdit, selStart);
 
     pTextDoc->Undo(tomResume, NULL);
     pTextDoc->Release();
-
     SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
     SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
-    if (bVisible)
-    {
-        SendMessageW(hEdit, WM_SETREDRAW, TRUE, 0);
-        RedrawWindow(hEdit, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
-    }
 }
 
 // Atualiza a linha em destaque (fundo NOTBAD_HIGHLIGHT_COLOR) e a cor do texto
@@ -2643,13 +2732,17 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
 
     codeDirty = g_settings.codeHighlighting && pDoc->bCodeHighlightTextDirty;
 
-    if (lineSame && selSame && !needInsFix)
+    // codeDirty: houve edicao de texto (EN_CHANGE) e o realce do codigo precisa
+    // ser recalculado. Sem isso, apagar um caractere (Backspace/Delete) com a
+    // linha e a selecao inalteradas saia daqui antes do bloco de HighLighting,
+    // e a palavra a esquerda de um gatilho apagado mantinha o realce.
+    if (lineSame && selSame && !needInsFix && !codeDirty)
     {
         s_bUpdatingHighlight = FALSE;
         return;
     }
 
-    if (!needInsFix && prevTextLen >= 0 && prevTextLen == textLen)
+    if (!needInsFix && !codeDirty && prevTextLen >= 0 && prevTextLen == textLen)
     {
         EditorMoveActiveColors(hEdit, pDoc,
                                wantLine ? start : 0, wantLine ? end : 0,
@@ -2713,7 +2806,6 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     {
         int hlStart = start;
         BOOL samePara;
-        BOOL covered = FALSE;
 
         // Ao editar, o paragrafo anterior tambem pode ter mudado (Enter divide
         // a linha; apagar um Enter junta duas). Reaplica os dois. Usar o
@@ -2729,19 +2821,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
                    pDoc->codeHighlightParaStart == hlStart &&
                    pDoc->codeHighlightParaEnd == end;
 
-        if (!codeDirty)
-        {
-            // Sem edicao: se a varredura lazy ja cobriu o trecho, ou se ele
-            // acabou de ser realcado, nao precisa limpar/reaplicar de novo.
-            if (pDoc->bCodeHighlightDone)
-                covered = TRUE;
-            else if (pDoc->codeHighlightNext > start)
-                covered = TRUE;
-            else if (samePara)
-                covered = TRUE;
-        }
-
-        if (!covered)
+        if (codeDirty || !samePara)
         {
             // Limpa negrito e italico anteriores do bloco para recalcular
             ITextRange* pCleanRange = NULL;
@@ -2854,6 +2934,208 @@ static LPWSTR EditorGetText(HWND hEdit, int* pcch)
 
     *pcch = copied;
     return lpText;
+}
+
+// Recortar/colar troca varios paragrafos de uma vez; o realce por paragrafo do
+// EN_CHANGE nao cobre o bloco inteiro. Refaz a faixa visivel depois da edicao
+// para o texto colado nao ficar sem negrito/italico.
+static void EditorRefreshAfterClipboardEdit(HWND hEdit)
+{
+    Document* pDoc = DocFromEdit(hEdit);
+
+    if (pDoc == NULL)
+        return;
+
+    EditorRestartUniversalHighlight(pDoc, FALSE);
+    EditorProcessViewportHighlight();
+}
+
+BOOL EditorCopyToClipboard(HWND hEdit, BOOL bCut)
+{
+    int start;
+    int end;
+    int copied;
+    int i;
+    LPWSTR lpText;
+    std::wstring clip;
+    HGLOBAL hMem;
+    LPWSTR lpDst;
+    BOOL clipboardOk = FALSE;
+    CHARRANGE cr;
+
+    if (hEdit == NULL)
+        return TRUE;
+
+    if (bCut && (GetWindowLongPtrW(hEdit, GWL_STYLE) & ES_READONLY))
+        return TRUE;
+
+    GetEditSelection(hEdit, &start, &end);
+    if (start < 0)
+        start = 0;
+    if (end < start)
+        end = start;
+    if (start == end)
+        return TRUE;
+
+    lpText = (LPWSTR)LocalAlloc(LMEM_ZEROINIT,
+                                ((SIZE_T)(end - start) + 1) * sizeof(WCHAR));
+    if (lpText == NULL)
+        return TRUE;
+
+    {
+        TEXTRANGEW tr = {};
+
+        tr.chrg.cpMin = start;
+        tr.chrg.cpMax = end;
+        tr.lpstrText = lpText;
+        copied = (int)SendMessageW(hEdit, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    }
+    if (copied < 0)
+        copied = 0;
+    if (copied > end - start)
+        copied = end - start;
+    lpText[copied] = L'\0';
+
+    clip.reserve((size_t)copied + 16);
+    for (i = 0; i < copied; ++i)
+    {
+        WCHAR ch = lpText[i];
+
+        if (ch == L'\r')
+        {
+            if (i + 1 < copied && lpText[i + 1] == L'\n')
+                ++i;
+            clip.append(L"\r\n");
+        }
+        else if (ch == L'\n')
+        {
+            clip.append(L"\r\n");
+        }
+        else
+        {
+            clip.push_back(ch);
+        }
+    }
+    LocalFree(lpText);
+
+    if (!clip.empty())
+    {
+        hMem = GlobalAlloc(GMEM_MOVEABLE, (clip.size() + 1) * sizeof(WCHAR));
+        if (hMem != NULL)
+        {
+            lpDst = (LPWSTR)GlobalLock(hMem);
+            if (lpDst != NULL)
+            {
+                memcpy(lpDst, clip.c_str(), (clip.size() + 1) * sizeof(WCHAR));
+                GlobalUnlock(hMem);
+
+                if (OpenClipboard(hEdit))
+                {
+                    if (EmptyClipboard() &&
+                        SetClipboardData(CF_UNICODETEXT, hMem) != NULL)
+                    {
+                        hMem = NULL;
+                        clipboardOk = TRUE;
+                    }
+                    CloseClipboard();
+                }
+            }
+            if (hMem != NULL)
+                GlobalFree(hMem);
+        }
+    }
+
+    if (bCut && clipboardOk)
+    {
+        cr.cpMin = start;
+        cr.cpMax = end;
+        SendMessageW(hEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
+        SendMessageW(hEdit, EM_REPLACESEL, TRUE, (LPARAM)L"");
+        EditorRefreshAfterClipboardEdit(hEdit);
+    }
+
+    return TRUE;
+}
+
+BOOL EditorPasteFromClipboard(HWND hEdit)
+{
+    HANDLE hData;
+    std::wstring text;
+    std::wstring normalized;
+    size_t i;
+
+    if (hEdit == NULL)
+        return TRUE;
+
+    if (GetWindowLongPtrW(hEdit, GWL_STYLE) & ES_READONLY)
+        return TRUE;
+
+    if (!OpenClipboard(hEdit))
+        return TRUE;
+
+    hData = GetClipboardData(CF_UNICODETEXT);
+    if (hData != NULL)
+    {
+        LPWSTR lpData = (LPWSTR)GlobalLock(hData);
+
+        if (lpData != NULL)
+        {
+            text.assign(lpData);
+            GlobalUnlock(hData);
+        }
+    }
+    else
+    {
+        hData = GetClipboardData(CF_TEXT);
+        if (hData != NULL)
+        {
+            char* lpData = (char*)GlobalLock(hData);
+
+            if (lpData != NULL)
+            {
+                int cch = MultiByteToWideChar(CP_ACP, 0, lpData, -1, NULL, 0);
+
+                if (cch > 0)
+                {
+                    std::vector<WCHAR> buffer((size_t)cch);
+
+                    MultiByteToWideChar(CP_ACP, 0, lpData, -1, &buffer[0], cch);
+                    text.assign(&buffer[0]);
+                }
+                GlobalUnlock(hData);
+            }
+        }
+    }
+
+    CloseClipboard();
+
+    if (text.empty())
+        return TRUE;
+
+    normalized.reserve(text.size());
+    for (i = 0; i < text.size(); ++i)
+    {
+        WCHAR ch = text[i];
+
+        if (ch == L'\r')
+        {
+            if (i + 1 < text.size() && text[i + 1] == L'\n')
+                ++i;
+            normalized.push_back(L'\r');
+        }
+        else if (ch == L'\n')
+        {
+            normalized.push_back(L'\r');
+        }
+        else
+        {
+            normalized.push_back(ch);
+        }
+    }
+
+    SendMessageW(hEdit, EM_REPLACESEL, TRUE, (LPARAM)normalized.c_str());
+    EditorRefreshAfterClipboardEdit(hEdit);
+    return TRUE;
 }
 
 // Tab / Shift+Tab em bloco. As linhas sao paragrafos logicos (nao as linhas
@@ -3009,6 +3291,19 @@ static BOOL EditorIndentBlock(HWND hEdit, BOOL shift)
     SendMessageW(hEdit, EM_SETSEL, newStart, newEnd);
 
     EditorEndBatch(hEdit, oldMask);
+
+    // A substituicao em lote nao gera EN_CHANGE, entao o realce precisa ser
+    // refeito aqui; sem isso o bloco inteiro perde o negrito/italico.
+    {
+        Document* pDoc = DocFromEdit(hEdit);
+
+        if (pDoc != NULL)
+        {
+            EditorRestartUniversalHighlight(pDoc, FALSE);
+            EditorUpdateCurrentLineHighlight(hEdit);
+            EditorProcessViewportHighlight();
+        }
+    }
 
     if (DocFromEdit(hEdit) != NULL)
         DocUpdateTabTitle(DocFromEdit(hEdit));
@@ -3504,12 +3799,14 @@ void EditorConvertTabs(BOOL bTabsToSpaces)
     // e avisar, para a pessoa saber que o comando rodou.
     if (o == length && memcmp(lpSrc, lpDst, (size_t)o * sizeof(WCHAR)) == 0)
     {
+        WCHAR szNothing[256];
+
         LocalFree(lpSrc);
         LocalFree(lpDst);
-        MessageBoxW(g_hWndMain,
-                    bTabsToSpaces ? L"There are no tabs in the indentation of this tab."
-                                  : L"There are no runs of spaces long enough to convert to tabs.",
-                    NOTBAD_NAME, MB_OK | MB_ICONINFORMATION);
+
+        LoadStringResource(bTabsToSpaces ? IDS_INDENT_NO_TABS : IDS_INDENT_NO_SPACES,
+                           szNothing, ARRAYSIZE(szNothing));
+        MessageBoxW(g_hWndMain, szNothing, NOTBAD_NAME, MB_OK | MB_ICONINFORMATION);
         return;
     }
 
@@ -3538,6 +3835,18 @@ void EditorConvertTabs(BOOL bTabsToSpaces)
     }
 
     EditorEndBatch(g_hWndEdit, oldMask);
+
+    // Mesmo caso do Tab em bloco: a troca em lote nao notifica EN_CHANGE.
+    {
+        Document* pDoc = DocFromEdit(g_hWndEdit);
+
+        if (pDoc != NULL)
+        {
+            EditorRestartUniversalHighlight(pDoc, FALSE);
+            EditorUpdateCurrentLineHighlight(g_hWndEdit);
+            EditorProcessViewportHighlight();
+        }
+    }
 
     LocalFree(lpSrc);
     LocalFree(lpDst);

@@ -1937,6 +1937,11 @@ static void ToggleWordWrap(void)
     g_settings.wordWrap = !g_settings.wordWrap;
     EditorApplyWordWrap(g_settings.wordWrap);
     InvalidateLineNumbers();
+    if (g_pActiveDoc != NULL)
+    {
+        g_pActiveDoc->bCodeHighlightViewValid = FALSE;
+        EditorScheduleUniversalHighlight(g_pActiveDoc);
+    }
     SettingsSave();
 }
 
@@ -2042,8 +2047,7 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         }
         if (wParam == NOTBAD_CODE_HIGHLIGHT_TIMER)
         {
-            if (!EditorProcessUniversalHighlightChunk())
-                KillTimer(hWnd, NOTBAD_CODE_HIGHLIGHT_TIMER);
+            EditorProcessViewportHighlight();
             return 0;
         }
         break;
@@ -2060,6 +2064,11 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_SIZE:
         LayoutChildren(hWnd);
+        if (g_pActiveDoc != NULL)
+        {
+            g_pActiveDoc->bCodeHighlightViewValid = FALSE;
+            EditorScheduleUniversalHighlight(g_pActiveDoc);
+        }
         return 0;
 
     case WM_ERASEBKGND:
@@ -2224,7 +2233,11 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         if (hdr->code == EN_VSCROLL && DocFromEdit(hdr->hwndFrom) == g_pActiveDoc)
         {
+            Document* pScrollDoc = DocFromEdit(hdr->hwndFrom);
+
             InvalidateLineNumbers();
+            if (pScrollDoc != NULL)
+                EditorScheduleUniversalHighlight(pScrollDoc);
             return 0;
         }
 
@@ -2238,6 +2251,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 // Reaplica de novo depois que o RichEdit terminar de tratar o clique.
                 if (pSelDoc != NULL && pSelDoc->bOverwrite)
                     PostMessageW(hWnd, GetReapplyCaretMessage(), 0, (LPARAM)hdr->hwndFrom);
+
+                // Se a selecao rolou a tela, o realce acompanha no proximo timer.
+                if (pSelDoc != NULL)
+                    EditorScheduleUniversalHighlight(pSelDoc);
             }
             UpdateStatusBar();
             UpdateEditMenuState(hWnd);

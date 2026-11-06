@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.4"
+#define NOTBAD_VERSION     L"1.0.5"
 #define WM_NOTBAD_CLOSETAB (WM_APP + 1)
 #define NOTBAD_CODE_HIGHLIGHT_TIMER 0x4C48
 #define MAX_EDIT_BUFFER     0x7FFFFFF0u
@@ -82,9 +82,10 @@ struct Document
     int          fgPrevTextLen;   // tamanho do texto na ultima atualizacao (-1 = desconhecido)
     BOOL         bReinterpreted; // encoding trocado por "reinterpretar"; limpo ao salvar/abrir
     BOOL         bOverwrite;     // modo Overwrite (tecla Insert), por documento
-    int          codeHighlightNext;    // proximo offset a processar pelo lazy highlighting
-    BOOL         bCodeHighlightDone;   // varredura lazy concluida
-    BOOL         bCodeHighlightCleared; // negrito antigo do arquivo ja removido nesta passada
+    int          codeHighlightViewStart;   // inicio do ultimo trecho visivel processado
+    int          codeHighlightViewEnd;     // fim do ultimo trecho visivel processado
+    BOOL         bCodeHighlightViewValid;  // o trecho acima ainda reflete a tela atual
+    BOOL         bCodeHighlightNeedsClean; // pode haver realce antigo fora da tela
     int          codeHighlightParaStart; // inicio do ultimo trecho realcado na linha atual
     int          codeHighlightParaEnd;   // fim do ultimo trecho realcado na linha atual
     BOOL         bCodeHighlightParaValid; // o trecho acima ainda reflete o texto atual
@@ -209,14 +210,16 @@ BOOL EditorTryOverwriteChar(HWND hEdit, WCHAR ch);
 void EditorPlaceCaretAtClick(HWND hEdit);
 void EditorPlaceCaretAtPoint(HWND hEdit, POINT pt);
 BOOL EditorHandleKeyDown(HWND hEdit, WPARAM wParam);
-void EditorClearUniversalHighlight(HWND hEdit);
+BOOL EditorCopyToClipboard(HWND hEdit, BOOL bCut);
+BOOL EditorPasteFromClipboard(HWND hEdit);
+void EditorResetCaretStyle(HWND hEdit);
 void EditorScheduleUniversalHighlight(Document* pDoc);
 void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear);
 void EditorSyncUniversalHighlight(Document* pDoc);
 void EditorInvalidateUniversalHighlight(Document* pDoc);
 void EditorCancelUniversalHighlight(void);
 void EditorCancelUniversalHighlightFor(Document* pDoc);
-BOOL EditorProcessUniversalHighlightChunk(void);
+BOOL EditorProcessViewportHighlight(void);
 
 
 // settings.cpp

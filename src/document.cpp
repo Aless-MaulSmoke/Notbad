@@ -111,10 +111,69 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
         return result;
     }
 
-    if (msg == WM_KEYDOWN && EditorHandleKeyDown(hWnd, wParam))
+    if (msg == WM_COPY)
+    {
+        EditorCopyToClipboard(hWnd, FALSE);
         return 0;
+    }
+
+    if (msg == WM_CUT)
+    {
+        EditorCopyToClipboard(hWnd, TRUE);
+        return 0;
+    }
+
+    if (msg == WM_PASTE)
+    {
+        EditorPasteFromClipboard(hWnd);
+        return 0;
+    }
+
+    if (msg == WM_KEYDOWN)
+    {
+        BOOL ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        BOOL alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        BOOL shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+        if (ctrl && !alt && !shift)
+        {
+            if (wParam == 'C')
+            {
+                EditorCopyToClipboard(hWnd, FALSE);
+                return 0;
+            }
+            if (wParam == 'X')
+            {
+                EditorCopyToClipboard(hWnd, TRUE);
+                return 0;
+            }
+            if (wParam == 'V')
+            {
+                EditorPasteFromClipboard(hWnd);
+                return 0;
+            }
+        }
+    }
+
+    if (msg == WM_KEYDOWN && EditorHandleKeyDown(hWnd, wParam))
+    {
+        // Delete (e o Backspace de indentacao) sao tratados por nos: o RichEdit
+        // ja terminou, entao o cursor pode perder o estilo do realce.
+        if (wParam == VK_DELETE || wParam == VK_BACK)
+            EditorResetCaretStyle(hWnd);
+        return 0;
+    }
 
     result = DefSubclassProc(hWnd, msg, wParam, lParam);
+
+    // Delete/Ctrl+Delete nativos agem no WM_KEYDOWN; o Backspace nativo age no
+    // WM_CHAR (8, ou 127 com Ctrl). Em ambos o cursor so e recalculado pelo
+    // RichEdit no fim da mensagem, entao o reset vem depois dela.
+    if ((msg == WM_KEYDOWN && wParam == VK_DELETE) ||
+        (msg == WM_CHAR && (wParam == 8 || wParam == 127)))
+    {
+        EditorResetCaretStyle(hWnd);
+    }
 
     if (msg == WM_SETFOCUS)
     {
@@ -151,6 +210,12 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
     // Rolagem e zoom fazem o RichEdit recriar o caret.
     if (msg == WM_VSCROLL || msg == WM_HSCROLL || msg == WM_MOUSEWHEEL)
         EditorUpdateCaretShape(hWnd);
+
+    if ((msg == WM_VSCROLL || msg == WM_HSCROLL || msg == WM_MOUSEWHEEL) &&
+        pDoc != NULL && pDoc == g_pActiveDoc)
+    {
+        EditorScheduleUniversalHighlight(pDoc);
+    }
 
     return result;
 }
@@ -348,8 +413,8 @@ void DocActivate(Document* pDoc)
 
     // Reanalisa o realce da aba que recebeu o foco: se o highlighting foi
     // ligado/desligado enquanto ela estava oculta, ela se ajusta agora; senao
-    // apenas retoma a varredura lazy. Vem antes da linha atual, que depende
-    // dos flags reiniciados aqui.
+    // apenas garante o realce da faixa visivel. Vem antes da linha atual, que
+    // depende dos flags reiniciados aqui.
     EditorSyncUniversalHighlight(pDoc);
     EditorUpdateCurrentLineHighlight(pDoc->hEdit);
 }
@@ -605,7 +670,7 @@ BOOL DocLoad(Document* pDoc, LPCWSTR lpFileName)
         UpdateStatusBar();
         UpdateEditMenuState(g_hWndMain);
 
-        // Reinicia a varredura lazy para o texto recem-carregado.
+        // Recalcula o realce da faixa visivel para o texto recem-carregado.
         EditorRestartUniversalHighlight(pDoc, TRUE);
     }
     else

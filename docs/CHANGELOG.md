@@ -1,5 +1,31 @@
 # CHANGELOG IN STEPS
 
+## v1.0.5
+
+### FIXES
+
+#### Code Highlighting
+* **Paste Formatting:** Adjusted RichEdit to always paste text using a special pattern that ignores formatting, eliminating the risk of inheriting styles from other RichText editors.
+* **Clipboard Formats:** Adjusted RichEdit so that text copies or cuts are always in Unicode format, preventing HighLighting Code formats from contaminating other editors.
+* **Italic Cursor Bug:** Fixed a visual bug where disabling HighLighting Code while the mouse cursor was over an italicized word left the keyboard cursor in an italic state, even after the text reverted to normal.
+* **Backspace Look-Behind:** Fixed an issue where deleting a HighLighting trigger character with BACKSPACE failed to trigger the look-behind, causing the word on the left to incorrectly keep its highlight.
+* **Delete Cursor Bug:** Fixed a bug where pressing DELETE while the keyboard cursor was positioned between a left word and a right ":" or "=" would erase the trigger character and remove the highlight, but leave the keyboard cursor format in italic.
+* **Block Indentation Refocus:** Fixed an issue where shifting block indentation forward with TAB or backward with Shift+TAB caused the block with HighLighting to lose its formatting.
+
+#### Editing
+* **Enter at Line Start:** Adjusted the behavior so that if the keyboard cursor is at the absolute beginning of a line, pressing ENTER will prevent it from seeking indentation and instead keep it at the start of the next line.
+
+### IMPLEMENTATIONS
+
+#### Code Highlighting
+* **Viewport Chunk Engine:** Implemented a new chunk-based engine in the viewport, optimized to update HighLighting exclusively within the visible editing area.
+
+#### Shortcuts
+* **Word Wrap:** Added a shortcut key for the Format -> Word Wrap menu (`Ctrl+W`).
+
+---
+
+
 ## v1.0.4
 
 ### FIXES
@@ -33,7 +59,7 @@
 * **Backward Compatibility:** Compiled in Visual Studio 2017 to guarantee compatible components starting from Windows 7, adopting only the x64 version.
 
 #### Localization
-* **Language Support:** Adjusted all dialogs and user messages within the `/res/notbad.rc` file. The language must be set based on the default Windows language, and Notbad will look into a `/lang` folder starting from the executable path; if the language is, for example, `es-AR` and `AR` is not in the list, it will fallback to standard `es`. If the language does not exist in the folder, Notbad will check the internal JSON files from the compilation to see if the specific language file exists; if the language file is still missing, it will use the internal `en` from the compilation.
+* **Language Support:** Automatically set based on the default Windows language; Notbad will then look for a json in `/lang` folder relative to the executable. For example, if the language is `es-AR` and `AR` is not in the list, it will fall back to the default `es`. If the language file does not exist in that folder, Notbad will check the JSON files embedded within the build for the specific language file. If it is still not found, it will default to `en` (English), which is also included within the build.
 
 ---
 

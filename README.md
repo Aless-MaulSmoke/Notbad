@@ -44,13 +44,13 @@ The project adheres to strict rules of the classic interface (Editing Window, Me
 * **Project Exploration:** Opening a folder (`Ctrl+Shift+O`) creates a side panel with a file tree view on demand, using the system's native icons. Toggle the panel quickly with `Ctrl+T`.
 
 ### 🔢 Dynamic Line Numbers (Gutter)
-* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks.
+* **Logical Lines:** The gutter calculates numbers intelligently. Long lines affected by word wrap share the same line number, preserving the document's logical line count. This is in addition to highlighting the currently indented blocks(`Ctrl+Shift+N`).
 
 ### ✍️ Intelligent Editing & Coding
 * **Advanced RichEdit Engine:** Powered by the Windows RichEdit engine, ensuring a robust, native multi-level *Undo* history per tab.
 * **Smart Indentation:** Dedicated dialog for Tab width adjustments, automatic conversion between tabs/spaces, and support for block indenting/unindenting with `Tab` / `Shift+Tab`.
-* **Line Highlight:** Option to visually highlight the current cursor line with a subtle light gray background (`Ctrl+Shift+H`).
-* **Code highlighting:** An option to visually highlight elements of source code. It uses a minimalist, universal approach applicable to all code (`Ctrl+Shift+K`).
+* **Line Highlight:** Option to visually highlight the current cursor line with a subtle light gray background (`Ctrl+Shift+L`).
+* **Code highlighting:** An option to visually highlight elements of source code. It uses a minimalist, universal approach applicable to all code (`Ctrl+Shift+H`).
 
 ### 🔍 Advanced Modeless Search
 * **Global Scope:** A custom Find/Replace dialog that allows for refined searches and batch replacements scanning **all open files** simultaneously.

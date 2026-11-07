@@ -162,6 +162,6 @@
 ## v1.0 — Initial Base
 
 ### IMPLEMENTATIONS
-* **Initial Version:** Ground-up reimplementation of a classic Notepad-like editor.
+* **Project Start:** Ground-up reimplementation of a classic Notepad-like editor.
 * **Initial Version:** Initial version in C++ (toolset v141 / VS 2017) produced with opencode.
 * **Core Features:** Single document, classic Edit, menu and shortcuts, encoding, native find/replace, printing, font, and registry configurations.

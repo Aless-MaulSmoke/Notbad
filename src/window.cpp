@@ -1,6 +1,8 @@
 #include "notbad.h"
 #include <commctrl.h>
 #include <richedit.h>
+#include <shlobj.h>
+#include <shlguid.h>
 #include <shobjidl.h>
 #include <algorithm>
 #include <string>
@@ -141,6 +143,13 @@ static int GetEditScrollY(HWND hEdit)
 
 static BOOL g_bTreeDrag = FALSE;
 static int  g_treeDragOffset = 0;
+
+// Arrasto de item do tree com o mouse (ver TVN_BEGINDRAG). O alvo de soltura
+// valido fica em g_bTreeDragDropItem (NULL = nenhum ou invalido).
+static BOOL        g_bTreeItemDrag = FALSE;
+static HTREEITEM   g_bTreeDragDropItem = NULL;
+static HIMAGELIST  g_hTreeDragImage = NULL;
+static std::wstring g_treeItemDragSrc;
 
 static BOOL IsTreeVisible(void)
 {
@@ -1153,6 +1162,27 @@ static void ToggleCodeHighlighting(void)
     SettingsSave();
 }
 
+// Fwd decls: maquinaria de desfazer (definida mais abaixo), usada pelos
+// ops do tree antes de sua posicao no arquivo.
+enum TreeUndoKind
+{
+    TREE_UNDO_NONE = 0,
+    TREE_UNDO_RENAME,
+    TREE_UNDO_MOVE,
+    TREE_UNDO_COPY,
+    TREE_UNDO_CREATE,
+    TREE_UNDO_DELETE
+};
+static void TreeUndoRecord(TreeUndoKind kind, LPCWSTR lpSrc, LPCWSTR lpDst);
+static BOOL TreeUndoLastOperation(void);
+static void TreeRestoreFocus(void);
+
+static void TreeRestoreFocus(void)
+{
+    if (g_hWndTree != NULL)
+        SetFocus(g_hWndTree);
+}
+
 static WCHAR* GetTreeItemPath(HTREEITEM hItem)
 {
     TVITEMW item = {};
@@ -1233,9 +1263,9 @@ static BOOL CreateFileTree(HWND hWnd)
         return TRUE;
 
     g_hWndTree = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, NULL,
-                                 WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS |
-                                 TVS_HASLINES | TVS_LINESATROOT |
-                                 TVS_SHOWSELALWAYS,
+                                  WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS |
+                                  TVS_HASLINES | TVS_LINESATROOT |
+                                  TVS_SHOWSELALWAYS | TVS_EDITLABELS,
                                  0, 0, 0, 0,
                                  hWnd, (HMENU)(INT_PTR)ID_TREE,
                                  g_hInstance, NULL);
@@ -1398,6 +1428,1307 @@ void UpdateTreeOpenMarks(void)
 
     UpdateTreeMarksFrom(TreeView_GetRoot(g_hWndTree));
 }
+
+static BOOL GetTreeTargetDirectory(HTREEITEM hItem, LPWSTR lpDir, int cchDir)
+{
+    WCHAR* pszPath;
+
+    if (g_hWndTree == NULL || lpDir == NULL || cchDir <= 0)
+        return FALSE;
+
+    lpDir[0] = L'\0';
+
+    if (hItem == NULL)
+        hItem = TreeView_GetSelection(g_hWndTree);
+    if (hItem == NULL)
+        hItem = TreeView_GetRoot(g_hWndTree);
+    if (hItem == NULL)
+        return FALSE;
+
+    pszPath = GetTreeItemPath(hItem);
+    if (pszPath == NULL)
+        return FALSE;
+
+    if (PathIsDirectoryW(pszPath))
+        StringCchCopyW(lpDir, cchDir, pszPath);
+    else
+    {
+        StringCchCopyW(lpDir, cchDir, pszPath);
+        PathRemoveFileSpecW(lpDir);
+    }
+
+    return lpDir[0] != L'\0';
+}
+
+static void RefreshFileTree(void);
+static std::wstring g_treeClipboardPath;
+static BOOL g_treeCutPending = FALSE;
+static void TreeSetCutMark(LPCWSTR lpPath, BOOL bCut);
+
+void RefreshFileTreeView(void)
+{
+    RefreshFileTree();
+
+    // Reaplica o estado de recortado depois da reconstrucao da arvore.
+    if (g_treeCutPending && !g_treeClipboardPath.empty())
+        TreeSetCutMark(g_treeClipboardPath.c_str(), TRUE);
+}
+
+BOOL GetTreeTargetDirectoryForSave(LPWSTR lpDir, int cchDir)
+{
+    if (g_hWndTree == NULL || lpDir == NULL || cchDir <= 0)
+        return FALSE;
+    if (!IsTreeVisible())
+        return FALSE;
+    if (GetFocus() != g_hWndTree)
+        return FALSE;
+
+    return GetTreeTargetDirectory(TreeView_GetSelection(g_hWndTree), lpDir, cchDir);
+}
+
+static HTREEITEM FindTreeItemByPath(HTREEITEM hItem, LPCWSTR lpPath)
+{
+    while (hItem != NULL)
+    {
+        WCHAR* pszPath = GetTreeItemPath(hItem);
+
+        if (pszPath != NULL && lstrcmpiW(pszPath, lpPath) == 0)
+            return hItem;
+
+        HTREEITEM hFound = FindTreeItemByPath(TreeView_GetChild(g_hWndTree, hItem), lpPath);
+        if (hFound != NULL)
+            return hFound;
+
+        hItem = TreeView_GetNextSibling(g_hWndTree, hItem);
+    }
+
+    return NULL;
+}
+
+static BOOL SetTreeItemPath(HTREEITEM hItem, LPCWSTR lpPath)
+{
+    TVITEMW item = {};
+    WCHAR* pszPath;
+
+    if (g_hWndTree == NULL || hItem == NULL || lpPath == NULL)
+        return FALSE;
+
+    pszPath = new WCHAR[MAX_FILE_PATH];
+    if (pszPath == NULL)
+        return FALSE;
+
+    StringCchCopyW(pszPath, MAX_FILE_PATH, lpPath);
+
+    item.mask = TVIF_PARAM;
+    item.hItem = hItem;
+    item.lParam = (LPARAM)pszPath;
+    if (!TreeView_SetItem(g_hWndTree, &item))
+    {
+        delete[] pszPath;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+// Separa o sufixo numerico " (n)" do final do nome base (ex.: "meu arquivo
+// (2).txt" -> stem "meu arquivo", nStart = 3). Sem sufixo, nStart = 2.
+static void TreeSplitCopyNumber(LPCWSTR lpStem, LPWSTR lpBase, int cchBase, int* pnStart)
+{
+    int len = lstrlenW(lpStem);
+    int i = len - 1;
+    int num = 0;
+    int place = 1;
+
+    *pnStart = 2;
+    StringCchCopyW(lpBase, cchBase, lpStem);
+
+    if (i < 0 || lpStem[i] != L')')
+        return;
+
+    --i;
+    if (i < 0 || lpStem[i] < L'0' || lpStem[i] > L'9')
+        return;
+
+    while (i >= 0 && lpStem[i] >= L'0' && lpStem[i] <= L'9')
+    {
+        num += (lpStem[i] - L'0') * place;
+        place *= 10;
+        --i;
+    }
+
+    if (i < 0 || lpStem[i] != L'(')
+        return;
+    if (i > 0 && lpStem[i - 1] != L' ')
+        return;
+
+    if (i > 0)
+        StringCchCopyNW(lpBase, cchBase, lpStem, i - 1);
+    else
+        lpBase[0] = L'\0';
+
+    if (num < 1)
+        num = 1;
+    *pnStart = num + 1;
+}
+
+// "name (<n>)<ext>": resolve conflito de nome no destino, incrementando n.
+static BOOL TreeMakeUniquePath(LPCWSTR lpDir, LPCWSTR lpDesired, LPWSTR lpOut, int cchOut)
+{
+    WCHAR szBase[MAX_PATH];
+    WCHAR szExt[MAX_PATH];
+    WCHAR szStem[MAX_PATH];
+    WCHAR szName[MAX_PATH];
+    WCHAR szPath[MAX_FILE_PATH];
+    size_t nameLen;
+    size_t extLen;
+    int nStart;
+
+    if (lpDir == NULL || lpDesired == NULL || lpOut == NULL || cchOut <= 0)
+        return FALSE;
+
+    StringCchCopyW(szName, ARRAYSIZE(szName), lpDesired);
+
+    {
+        LPCWSTR lpExt = PathFindExtensionW(szName);
+
+        if (lpExt != NULL && lpExt[0] != L'\0' && lpExt != szName)
+        {
+            StringCchCopyW(szExt, ARRAYSIZE(szExt), lpExt);
+            extLen = lstrlenW(szExt);
+            nameLen = lstrlenW(szName);
+            if (extLen < nameLen)
+                nameLen -= extLen;
+            StringCchCopyNW(szBase, ARRAYSIZE(szBase), szName, nameLen);
+            szBase[nameLen] = L'\0';
+        }
+        else
+        {
+            StringCchCopyW(szBase, ARRAYSIZE(szBase), szName);
+            szExt[0] = L'\0';
+        }
+    }
+
+    TreeSplitCopyNumber(szBase, szStem, ARRAYSIZE(szStem), &nStart);
+
+    // Tentativa 1: o nome desejado.
+    StringCchCopyW(szName, ARRAYSIZE(szName), lpDesired);
+    JoinTreePath(szPath, ARRAYSIZE(szPath), lpDir, szName);
+    if (GetFileAttributesW(szPath) == INVALID_FILE_ATTRIBUTES)
+    {
+        StringCchCopyW(lpOut, cchOut, szPath);
+        return TRUE;
+    }
+
+    // Tentativas seguintes: stem (n).ext, n a partir de nStart.
+    for (int n = nStart; n < 10000; ++n)
+    {
+        StringCchPrintfW(szName, ARRAYSIZE(szName), L"%s (%d)%s", szStem, n, szExt);
+        JoinTreePath(szPath, ARRAYSIZE(szPath), lpDir, szName);
+        if (GetFileAttributesW(szPath) == INVALID_FILE_ATTRIBUTES)
+        {
+            StringCchCopyW(lpOut, cchOut, szPath);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static void TreeUpdateOpenDocsRenamed(LPCWSTR lpOld, LPCWSTR lpNew, BOOL bDir)
+{
+    size_t oldLen;
+
+    if (lpOld == NULL || lpNew == NULL)
+        return;
+
+    oldLen = lstrlenW(lpOld);
+
+    for (size_t i = 0; i < g_documents.size(); ++i)
+    {
+        Document* pDoc = g_documents[i];
+        WCHAR szNew[MAX_FILE_PATH] = {};
+        BOOL changed = FALSE;
+
+        if (!pDoc->bHasPath)
+            continue;
+
+        if (bDir)
+        {
+            size_t docLen = lstrlenW(pDoc->szFilePath);
+
+            if (docLen >= oldLen &&
+                _wcsnicmp(pDoc->szFilePath, lpOld, oldLen) == 0 &&
+                (pDoc->szFilePath[oldLen] == L'\0' || pDoc->szFilePath[oldLen] == L'\\' ||
+                 pDoc->szFilePath[oldLen] == L'/'))
+            {
+                StringCchCopyW(szNew, ARRAYSIZE(szNew), lpNew);
+                StringCchCatW(szNew, ARRAYSIZE(szNew), pDoc->szFilePath + oldLen);
+                changed = TRUE;
+            }
+        }
+        else if (lstrcmpiW(pDoc->szFilePath, lpOld) == 0)
+        {
+            StringCchCopyW(szNew, ARRAYSIZE(szNew), lpNew);
+            changed = TRUE;
+        }
+
+        if (!changed)
+            continue;
+
+        StringCchCopyW(pDoc->szFilePath, ARRAYSIZE(pDoc->szFilePath), szNew);
+        StringCchCopyW(pDoc->szFileTitle, ARRAYSIZE(pDoc->szFileTitle),
+                       PathFindFileNameW(szNew));
+        DocUpdateTabTitle(pDoc);
+
+        if (pDoc == g_pActiveDoc)
+        {
+            UpdateWindowTitle();
+            UpdateStatusBar();
+            UpdateEditMenuState(g_hWndMain);
+        }
+    }
+}
+
+static void TreeUpdateItemPathPrefix(HTREEITEM hItem, LPCWSTR lpOldPrefix, LPCWSTR lpNewPrefix)
+{
+    size_t oldLen = lstrlenW(lpOldPrefix);
+    size_t newLen = lstrlenW(lpNewPrefix);
+
+    while (hItem != NULL)
+    {
+        WCHAR* pszPath = GetTreeItemPath(hItem);
+
+        if (pszPath != NULL && _wcsnicmp(pszPath, lpOldPrefix, oldLen) == 0 &&
+            (pszPath[oldLen] == L'\0' || pszPath[oldLen] == L'\\'))
+        {
+            WCHAR szNew[MAX_FILE_PATH] = {};
+
+            StringCchCopyW(szNew, ARRAYSIZE(szNew), lpNewPrefix);
+            StringCchCatW(szNew, ARRAYSIZE(szNew), pszPath + oldLen);
+            SetTreeItemPath(hItem, szNew);
+        }
+
+        TreeUpdateItemPathPrefix(TreeView_GetChild(g_hWndTree, hItem),
+                                 lpOldPrefix, lpNewPrefix);
+
+        hItem = TreeView_GetNextSibling(g_hWndTree, hItem);
+    }
+}
+
+static void TreeBeginRename(HTREEITEM hItem)
+{
+    if (g_hWndTree == NULL || hItem == NULL)
+        return;
+    if (hItem == TreeView_GetRoot(g_hWndTree))
+        return;   // a raiz não é renomeável
+
+    SetFocus(g_hWndTree);
+    TreeView_EditLabel(g_hWndTree, hItem);
+}
+
+static HTREEITEM TreeSelectionNotRoot(void)
+{
+    HTREEITEM hItem;
+
+    if (g_hWndTree == NULL)
+        return NULL;
+
+    hItem = TreeView_GetSelection(g_hWndTree);
+    if (hItem == NULL || hItem == TreeView_GetRoot(g_hWndTree))
+        return NULL;
+
+    return hItem;
+}
+
+static void TreeCreateNewFile(void)
+{
+    WCHAR szDir[MAX_FILE_PATH];
+    WCHAR szPath[MAX_FILE_PATH];
+    WCHAR szName[MAX_PATH];
+    WCHAR szUntitled[128];
+    DWORD attrs;
+    int n;
+    HANDLE hFile;
+    HTREEITEM hItem;
+
+    if (g_hWndTree == NULL)
+        return;
+
+    // A criação acontece na pasta selecionada; arquivo selecionado vai para a
+    // pasta pai; nenhuma seleção usa a raiz.
+    wmemset(szDir, 0, ARRAYSIZE(szDir));
+    {
+        HTREEITEM hTarget = TreeView_GetSelection(g_hWndTree);
+        WCHAR* pszSel = (hTarget != NULL) ? GetTreeItemPath(hTarget) : NULL;
+
+        if (pszSel != NULL)
+        {
+            if (PathIsDirectoryW(pszSel))
+                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszSel);
+            else
+            {
+                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszSel);
+                PathRemoveFileSpecW(szDir);
+            }
+        }
+        else
+        {
+            HTREEITEM hRoot = TreeView_GetRoot(g_hWndTree);
+            WCHAR* pszRoot = (hRoot != NULL) ? GetTreeItemPath(hRoot) : NULL;
+
+            if (pszRoot != NULL)
+                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszRoot);
+        }
+    }
+
+    if (szDir[0] == L'\0')
+        return;
+
+    LoadStringResource(IDS_UNTITLED, szUntitled, ARRAYSIZE(szUntitled));
+
+    // Nome pela regra da aba (Untitled, Untitled 2...); ignora os já usados.
+    for (n = 1; n < 10000; ++n)
+    {
+        if (n == 1)
+            StringCchCopyW(szName, ARRAYSIZE(szName), szUntitled);
+        else
+            StringCchPrintfW(szName, ARRAYSIZE(szName), L"%s %d", szUntitled, n);
+
+        JoinTreePath(szPath, ARRAYSIZE(szPath), szDir, szName);
+        attrs = GetFileAttributesW(szPath);
+        if (attrs == INVALID_FILE_ATTRIBUTES)
+            break;
+    }
+    if (n >= 10000)
+        return;
+
+    hFile = CreateFileW(szPath, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                        FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+        return;
+    CloseHandle(hFile);
+
+    TreeUndoRecord(TREE_UNDO_CREATE, szPath, NULL);
+
+    RefreshFileTree();
+    EditorOpen(szPath);
+
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szPath);
+    if (hItem != NULL)
+    {
+        TreeView_SelectItem(g_hWndTree, hItem);
+        TreeView_EnsureVisible(g_hWndTree, hItem);
+        TreeBeginRename(hItem);
+    }
+}
+
+static BOOL HandleTreeBeginLabelEdit(NMTVDISPINFOW* ptvdi)
+{
+    if (ptvdi == NULL)
+        return TRUE;   // cancela por seguranca
+    if (ptvdi->item.hItem == TreeView_GetRoot(g_hWndTree))
+        return TRUE;   // a raiz nao e renomeavel
+
+    return FALSE;   // permite edicao
+}
+
+static BOOL HandleTreeEndLabelEdit(NMTVDISPINFOW* ptvdi)
+{
+    WCHAR szOldPath[MAX_FILE_PATH];
+    WCHAR szDir[MAX_FILE_PATH];
+    WCHAR szNewPath[MAX_FILE_PATH] = {};
+    WCHAR szDesired[MAX_PATH];
+    LPCWSTR lpName;
+    BOOL bDir;
+    TVITEMW item = {};
+
+    if (ptvdi == NULL || ptvdi->item.hItem == NULL)
+        return FALSE;
+    if (ptvdi->item.pszText == NULL || ptvdi->item.pszText[0] == L'\0')
+        return FALSE;   // cancelou ou texto vazio
+
+    {
+        WCHAR* pszOld = GetTreeItemPath(ptvdi->item.hItem);
+
+        if (pszOld == NULL)
+            return FALSE;
+        StringCchCopyW(szOldPath, ARRAYSIZE(szOldPath), pszOld);
+    }
+
+    bDir = PathIsDirectoryW(szOldPath);
+
+    StringCchCopyW(szDir, ARRAYSIZE(szDir), szOldPath);
+    PathRemoveFileSpecW(szDir);
+    StringCchCopyW(szDesired, ARRAYSIZE(szDesired), ptvdi->item.pszText);
+
+    JoinTreePath(szNewPath, ARRAYSIZE(szNewPath), szDir, szDesired);
+    if (lstrcmpiW(szNewPath, szOldPath) == 0)
+        return FALSE;
+
+    if (GetFileAttributesW(szNewPath) != INVALID_FILE_ATTRIBUTES)
+    {
+        if (!TreeMakeUniquePath(szDir, szDesired, szNewPath, ARRAYSIZE(szNewPath)))
+            return FALSE;
+    }
+
+    if (!MoveFileW(szOldPath, szNewPath))
+        return FALSE;
+
+    TreeUndoRecord(TREE_UNDO_RENAME, szOldPath, szNewPath);
+
+    TreeUpdateOpenDocsRenamed(szOldPath, szNewPath, bDir);
+
+    // Pasta renomeada: atualiza os caminhos dos itens filhos.
+    if (bDir)
+        TreeUpdateItemPathPrefix(TreeView_GetChild(g_hWndTree, ptvdi->item.hItem),
+                                 szOldPath, szNewPath);
+
+    // Atualiza o lParam do item com o caminho novo.
+    {
+        WCHAR* pszOld = GetTreeItemPath(ptvdi->item.hItem);
+        WCHAR* pszNewItem = new WCHAR[MAX_FILE_PATH];
+
+        if (pszNewItem != NULL)
+        {
+            StringCchCopyW(pszNewItem, MAX_FILE_PATH, szNewPath);
+            item.mask = TVIF_PARAM;
+            item.hItem = ptvdi->item.hItem;
+            item.lParam = (LPARAM)pszNewItem;
+
+            if (TreeView_SetItem(g_hWndTree, &item) && pszOld != NULL)
+                delete[] pszOld;
+            else
+                delete[] pszNewItem;
+        }
+    }
+
+    // Texto e icone.
+    lpName = PathFindFileNameW(szNewPath);
+    item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+    item.hItem = ptvdi->item.hItem;
+    item.pszText = (LPWSTR)lpName;
+    {
+        int icon = GetTreeIconIndex(szNewPath,
+                                    bDir ? FILE_ATTRIBUTE_DIRECTORY
+                                         : FILE_ATTRIBUTE_NORMAL);
+        item.iImage = icon;
+        item.iSelectedImage = icon;
+    }
+    TreeView_SetItem(g_hWndTree, &item);
+
+    UpdateTreeOpenMarks();
+
+    // Reconstruir a arvore para que nao aparecam estago stale/mescladas
+    // (dois itens com o mesmo nome quando um conflito foi resolvido).
+    RefreshFileTree();
+
+    {
+        HTREEITEM hNew = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szNewPath);
+
+        if (hNew != NULL)
+        {
+            TreeView_SelectItem(g_hWndTree, hNew);
+            TreeView_EnsureVisible(g_hWndTree, hNew);
+        }
+    }
+    TreeRestoreFocus();
+
+    return TRUE;
+}
+
+#ifndef TVIS_CUT
+#define TVIS_CUT 0x0004
+#endif
+
+// Area de transferencia do tree: item pendente recortado/copiado (o caminho),
+// a marca de recortado (icone translucido) e a flag associada ao tree exigida
+// pelo requisito — se o usuario colocar algo na Area de Transferencia global,
+// o item volta ao normal.
+static BOOL g_treeClipboardCut = FALSE;
+
+static BOOL TreePathMatchesOrContains(LPCWSTR lpBase, LPCWSTR lpPath)
+{
+    size_t baseLen;
+
+    if (lpBase == NULL || lpPath == NULL)
+        return FALSE;
+
+    baseLen = lstrlenW(lpBase);
+    if (_wcsnicmp(lpBase, lpPath, baseLen) != 0)
+        return FALSE;
+
+    return lpPath[baseLen] == L'\0' || lpPath[baseLen] == L'\\' || lpPath[baseLen] == L'/';
+}
+
+static void TreeSetCutMark(LPCWSTR lpPath, BOOL bCut)
+{
+    HTREEITEM hItem;
+
+    if (g_hWndTree == NULL || lpPath == NULL)
+        return;
+
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), lpPath);
+    if (hItem != NULL)
+        TreeView_SetItemState(g_hWndTree, hItem, bCut ? TVIS_CUT : 0, TVIS_CUT);
+}
+
+static void TreeClearClipboardMark(void)
+{
+    if (g_treeCutPending)
+        TreeSetCutMark(g_treeClipboardPath.c_str(), FALSE);
+
+    g_treeCutPending = FALSE;
+    g_treeClipboardCut = FALSE;
+    g_treeClipboardPath.clear();
+}
+
+static void TreeCopyOrMoveItem(LPCWSTR lpSrc, LPCWSTR lpDestDir, BOOL bMove)
+{
+    WCHAR szSrcDir[MAX_FILE_PATH];
+    WCHAR szName[MAX_PATH];
+    WCHAR szDest[MAX_FILE_PATH];
+    WCHAR szFrom[MAX_FILE_PATH + 2] = {};
+    WCHAR szTo[MAX_FILE_PATH + 2] = {};
+    SHFILEOPSTRUCTW op = {};
+    BOOL bDir;
+
+    if (lpSrc == NULL || lpDestDir == NULL)
+        return;
+
+    bDir = PathIsDirectoryW(lpSrc);
+
+    // Colar na mesma pasta de um recorte nao faz nada.
+    if (bMove)
+    {
+        StringCchCopyW(szSrcDir, ARRAYSIZE(szSrcDir), lpSrc);
+        PathRemoveFileSpecW(szSrcDir);
+        if (lstrcmpiW(szSrcDir, lpDestDir) == 0)
+            return;
+    }
+
+    // Nao entra dentro de si mesmo nem de subpasta dele.
+    if (TreePathMatchesOrContains(lpSrc, lpDestDir))
+        return;
+
+    StringCchCopyW(szName, ARRAYSIZE(szName), PathFindFileNameW(lpSrc));
+    if (!TreeMakeUniquePath(lpDestDir, szName, szDest, ARRAYSIZE(szDest)))
+        return;
+
+    StringCchCopyW(szFrom, ARRAYSIZE(szFrom) - 1, lpSrc);
+    StringCchCopyW(szTo, ARRAYSIZE(szTo) - 1, szDest);
+
+    op.hwnd = g_hWndMain;
+    op.wFunc = bMove ? FO_MOVE : FO_COPY;
+    op.pFrom = szFrom;
+    op.pTo = szTo;
+    op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+
+    if (SHFileOperationW(&op) != 0 || op.fAnyOperationsAborted)
+        return;
+
+    if (bMove)
+        TreeUpdateOpenDocsRenamed(lpSrc, szDest, bDir);
+
+    TreeUndoRecord(bMove ? TREE_UNDO_MOVE : TREE_UNDO_COPY,
+                   bMove ? lpSrc : szDest,
+                   bMove ? szDest : NULL);
+
+    // SO o recorte e consumido ao colar; a copia fica no tree para
+    // colacoes repetidas (cada colagem gera o proximo numero).
+    if (bMove)
+        TreeClearClipboardMark();
+
+    RefreshFileTree();
+
+    {
+        HTREEITEM hNew = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szDest);
+
+        if (hNew != NULL)
+        {
+            TreeView_SelectItem(g_hWndTree, hNew);
+            TreeView_EnsureVisible(g_hWndTree, hNew);
+        }
+    }
+    SetFocus(g_hWndTree);
+}
+
+static void HandleTreeClipboardKey(HTREEITEM hItem, WCHAR wVKey)
+{
+    WCHAR* pszPath;
+
+    if (g_hWndTree == NULL || (GetKeyState(VK_CONTROL) & 0x8000) == 0)
+        return;
+
+    if (wVKey == 'X' || wVKey == 'C')
+    {
+        if (hItem == NULL || hItem == TreeView_GetRoot(g_hWndTree))
+            return;
+
+        TreeClearClipboardMark();      // remove qualquer marca pendente antes
+
+        pszPath = GetTreeItemPath(hItem);
+        if (pszPath == NULL)
+            return;
+
+        g_treeClipboardPath = pszPath;
+        g_treeClipboardCut = (wVKey == 'X');
+        g_treeCutPending = g_treeClipboardCut;
+
+        if (g_treeClipboardCut)
+            TreeSetCutMark(g_treeClipboardPath.c_str(), TRUE);
+        return;
+    }
+
+    if (wVKey == 'V')
+    {
+        WCHAR szDir[MAX_FILE_PATH];
+
+        if (g_treeClipboardPath.empty())
+            return;
+        if (!GetTreeTargetDirectory(hItem, szDir, ARRAYSIZE(szDir)))
+            return;
+
+        TreeCopyOrMoveItem(g_treeClipboardPath.c_str(), szDir, g_treeClipboardCut);
+        return;
+    }
+}
+
+// Desfazer da ultima operacao de arquivo feita no tree (uma so, a mais
+// recente). Registrada pelas operacoes do tree e consumida pelo Ctrl+Z com o
+// foco no tree.
+struct TreeUndoEntry
+{
+    TreeUndoKind kind;
+    std::wstring pathSrc;   // origem da operacao (RENAME/MOVE: caminho original)
+    std::wstring pathDst;   // destino (RENAME/MOVE); vazio para COPY/CREATE/DELETE
+    FILETIME     time;
+};
+
+static TreeUndoEntry g_treeUndo = {};
+
+static void TreeUndoRecord(TreeUndoKind kind, LPCWSTR lpSrc, LPCWSTR lpDst)
+{
+    g_treeUndo.kind = kind;
+    g_treeUndo.pathSrc = (lpSrc != NULL) ? lpSrc : L"";
+    g_treeUndo.pathDst = (lpDst != NULL) ? lpDst : L"";
+    GetSystemTimeAsFileTime(&g_treeUndo.time);
+}
+
+static void TreeUndoClear(void)
+{
+    g_treeUndo.kind = TREE_UNDO_NONE;
+    g_treeUndo.pathSrc.clear();
+    g_treeUndo.pathDst.clear();
+    g_treeUndo.time = {};
+}
+
+static void TreeUndoFailed(void)
+{
+    WCHAR szMsg[128];
+
+    LoadStringResource(IDS_TREE_UNDO_FAILED, szMsg, ARRAYSIZE(szMsg));
+    MessageBoxW(g_hWndMain, szMsg, NOTBAD_NAME, MB_OK | MB_ICONWARNING);
+    TreeRestoreFocus();
+}
+
+static void TreeSelectItemByPath(LPCWSTR lpPath)
+{
+    HTREEITEM hItem;
+
+    if (g_hWndTree == NULL || lpPath == NULL)
+        return;
+
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), lpPath);
+    if (hItem != NULL)
+    {
+        TreeView_SelectItem(g_hWndTree, hItem);
+        TreeView_EnsureVisible(g_hWndTree, hItem);
+    }
+}
+
+// Fecha documentos abertos cujo caminho esta dentro de lpPath. Retorna FALSE
+// quando o usuario cancela o salvamento de algum documento (a operacao que
+// apagaria o arquivo deve ser abortada); TRUE caso contrario.
+static BOOL TreeCloseDocsUnderPath(LPCWSTR lpPath)
+{
+    size_t i = 0;
+
+    while (i < g_documents.size())
+    {
+        Document* pDoc = g_documents[i];
+
+        if (pDoc->bHasPath && TreePathMatchesOrContains(lpPath, pDoc->szFilePath))
+        {
+            if (!DocClose(pDoc))
+                return FALSE;
+            i = 0;
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
+    return TRUE;
+}
+
+// Acha na Lixeira o item cuja pasta de origem coincide com lpDir e cujo nome
+// (tolerante a extensao oculta) coincide com lpName; entre os candidatos,
+// prefere o excluido mais recentemente. Retorna o pidl do item (a liberar
+// com CoTaskMemFree) ou NULL.
+static PITEMID_CHILD TreeFindBinItem(IShellFolder2* psf, LPCWSTR lpDir, LPCWSTR lpName)
+{
+    IEnumIDList* penum = NULL;
+    PITEMID_CHILD pidlBest = NULL;
+    LARGE_INTEGER ftBest = {};
+    BOOL hasBestDate = FALSE;
+    size_t dirLen;
+
+    if (FAILED(psf->EnumObjects(NULL, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &penum)) ||
+        penum == NULL)
+        return NULL;
+
+    dirLen = lstrlenW(lpDir);
+
+    while (TRUE)
+    {
+        PITEMID_CHILD pidl = NULL;
+        WCHAR szDisplaced[MAX_FILE_PATH] = {};
+        WCHAR szBinName[MAX_PATH] = {};
+        VARIANT vtFrom = {};
+        VARIANT vtDate = {};
+        BOOL dirOk = FALSE;
+        BOOL nameOk = FALSE;
+        const SHCOLUMNID scidFrom = { PSGUID_DISPLACED, PID_DISPLACED_FROM };
+        const SHCOLUMNID scidDate = { PSGUID_DISPLACED, PID_DISPLACED_DATE };
+
+        if (penum->Next(1, &pidl, NULL) != S_OK || pidl == NULL)
+            break;
+
+        VariantInit(&vtFrom);
+        VariantInit(&vtDate);
+
+        // Pasta de origem do item excluido (ou o caminho completo, tolerado).
+        if (SUCCEEDED(psf->GetDetailsEx(pidl, &scidFrom, &vtFrom)) &&
+            SUCCEEDED(VariantChangeType(&vtFrom, &vtFrom, 0, VT_BSTR)) &&
+            vtFrom.bstrVal != NULL)
+        {
+            StringCchCopyW(szDisplaced, ARRAYSIZE(szDisplaced), vtFrom.bstrVal);
+            size_t rawLen = lstrlenW(szDisplaced);
+
+            while (rawLen > 0 && (szDisplaced[rawLen - 1] == L'\\' || szDisplaced[rawLen - 1] == L'/'))
+                szDisplaced[--rawLen] = L'\0';
+
+            // A coluna pode trazer o caminho completo; se terminar com o
+            // nosso nome, a pasta de origem e o diretorio do caminho.
+            LPCWSTR lpNameFromCol = PathFindFileNameW(szDisplaced);
+            if (lpNameFromCol != NULL && lstrcmpiW(lpNameFromCol, lpName) == 0)
+                PathRemoveFileSpecW(szDisplaced);
+        }
+        {
+            size_t dsLen = lstrlenW(szDisplaced);
+            dirOk = (dirLen == dsLen) && _wcsnicmp(lpDir, szDisplaced, dirLen) == 0;
+        }
+        VariantClear(&vtFrom);
+
+        // Nome como aparece na Lixeira (pode omitir a extensao oculta).
+        if (dirOk)
+        {
+            STRRET sr = {};
+
+            if (SUCCEEDED(psf->GetDisplayNameOf(pidl, SHGDN_INFOLDER, &sr)) &&
+                SUCCEEDED(StrRetToBufW(&sr, pidl, szBinName, ARRAYSIZE(szBinName))))
+            {
+                if (lstrcmpiW(szBinName, lpName) == 0)
+                    nameOk = TRUE;
+                else
+                {
+                    LPCWSTR lpExt = PathFindExtensionW(lpName);
+
+                    if (lpExt != NULL && lpExt[0] != L'\0')
+                    {
+                        size_t baseLen = (size_t)(lstrlenW(lpName) - lstrlenW(lpExt));
+
+                        if (_wcsnicmp(szBinName, lpName, baseLen) == 0 &&
+                            szBinName[baseLen] == L'\0')
+                        {
+                            nameOk = TRUE;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (dirOk && nameOk)
+        {
+            LARGE_INTEGER ftCand;
+            BOOL hasDate = FALSE;
+
+            ftCand.QuadPart = 0;
+            if (SUCCEEDED(psf->GetDetailsEx(pidl, &scidDate, &vtDate)) &&
+                SUCCEEDED(VariantChangeType(&vtDate, &vtDate, 0, VT_DATE)))
+            {
+                // VT_DATE (dias desde 1899-12-30) -> FILETIME aproximado
+                double days = vtDate.date;
+                ftCand.QuadPart = (LONGLONG)((days + 109205.0) * 86400.0 * 10000000.0);
+                hasDate = TRUE;
+            }
+
+            if (pidlBest == NULL)
+            {
+                pidlBest = pidl;
+                ftBest = ftCand;
+                hasBestDate = hasDate;
+                pidl = NULL;
+            }
+            else if (hasDate && (!hasBestDate || ftCand.QuadPart >= ftBest.QuadPart))
+            {
+                CoTaskMemFree(pidlBest);
+                pidlBest = pidl;
+                ftBest = ftCand;
+                hasBestDate = TRUE;
+                pidl = NULL;
+            }
+        }
+        VariantClear(&vtDate);
+
+        if (pidl != NULL)
+            CoTaskMemFree(pidl);
+    }
+
+    penum->Release();
+    return pidlBest;
+}
+
+// Desfaz exclusao: restaura da Lixeira o item excluido mais recentemente.
+static BOOL TreeUndoDeleteRestore(void)
+{
+    WCHAR szDir[MAX_FILE_PATH];
+    WCHAR szName[MAX_PATH];
+    LPCWSTR lpName;
+    PIDLIST_ABSOLUTE pidlBin = NULL;
+    IShellFolder2* psf = NULL;
+    PITEMID_CHILD pidlItem = NULL;
+    IShellItem* binItem = NULL;
+    IShellItem* destFolder = NULL;
+    IFileOperation* pOp = NULL;
+    BOOL ok = FALSE;
+    HRESULT hr;
+
+    if (g_treeUndo.pathSrc.empty())
+        return FALSE;
+
+    lpName = PathFindFileNameW(g_treeUndo.pathSrc.c_str());
+    if (lpName == NULL || lpName[0] == L'\0')
+        return FALSE;
+    StringCchCopyW(szName, ARRAYSIZE(szName), lpName);
+
+    StringCchCopyW(szDir, ARRAYSIZE(szDir), g_treeUndo.pathSrc.c_str());
+    PathRemoveFileSpecW(szDir);
+
+    if (GetFileAttributesW(szDir) == INVALID_FILE_ATTRIBUTES ||
+        (GetFileAttributesW(szDir) & FILE_ATTRIBUTE_DIRECTORY) == 0)
+        return FALSE;   // a pasta de origem nao existe mais
+
+    if (GetFileAttributesW(g_treeUndo.pathSrc.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return FALSE;   // algo reapareceu no caminho original; nao sobrescrever
+
+    hr = SHGetSpecialFolderLocation(NULL, CSIDL_BITBUCKET, &pidlBin);
+    if (FAILED(hr) || pidlBin == NULL)
+        goto cleanup;
+
+    {
+        IShellFolder* psfDesktop = NULL;
+
+        hr = SHGetDesktopFolder(&psfDesktop);
+        if (FAILED(hr) || psfDesktop == NULL)
+            goto cleanup;
+        hr = psfDesktop->BindToObject(pidlBin, NULL, IID_PPV_ARGS(&psf));
+        psfDesktop->Release();
+        if (FAILED(hr) || psf == NULL)
+            goto cleanup;
+    }
+
+    pidlItem = TreeFindBinItem(psf, szDir, szName);
+    if (pidlItem == NULL)
+        goto cleanup;
+
+    {
+        PIDLIST_ABSOLUTE pidlAbs = ILCombine(pidlBin, pidlItem);
+
+        if (pidlAbs != NULL)
+        {
+            hr = SHCreateItemFromIDList(pidlAbs, IID_PPV_ARGS(&binItem));
+            ILFree(pidlAbs);
+        }
+        else
+        {
+            hr = E_OUTOFMEMORY;
+        }
+    }
+    if (FAILED(hr) || binItem == NULL)
+        goto cleanup;
+
+    hr = SHCreateItemFromParsingName(szDir, NULL, IID_PPV_ARGS(&destFolder));
+    if (FAILED(hr) || destFolder == NULL)
+        goto cleanup;
+
+    hr = CoCreateInstance(CLSID_FileOperation, NULL, CLSCTX_ALL,
+                          IID_PPV_ARGS(&pOp));
+    if (FAILED(hr) || pOp == NULL)
+        goto cleanup;
+
+    pOp->SetOperationFlags(FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI);
+
+    hr = pOp->MoveItem(binItem, destFolder, szName, NULL);
+    if (FAILED(hr))
+        goto cleanup;
+
+    hr = pOp->PerformOperations();
+    if (FAILED(hr))
+        goto cleanup;
+
+    {
+        BOOL aborted = FALSE;
+
+        pOp->GetAnyOperationsAborted(&aborted);
+        if (aborted)
+            goto cleanup;
+    }
+
+    RefreshFileTree();
+    TreeSelectItemByPath(g_treeUndo.pathSrc.c_str());
+    TreeRestoreFocus();
+    ok = TRUE;
+
+cleanup:
+    if (pOp != NULL)
+        pOp->Release();
+    if (destFolder != NULL)
+        destFolder->Release();
+    if (binItem != NULL)
+        binItem->Release();
+    if (pidlItem != NULL)
+        CoTaskMemFree(pidlItem);
+    if (psf != NULL)
+        psf->Release();
+    if (pidlBin != NULL)
+        CoTaskMemFree(pidlBin);
+    return ok;
+}
+
+// Desfaz exclusao/copia/criacao enviando o item gerado para a Lixeira; nao
+// pede confirmacao de novo — a confirmacao da operacao desfeita ja foi dada.
+static BOOL TreeUndoRecycleCreated(LPCWSTR lpPath)
+{
+    WCHAR szFrom[MAX_FILE_PATH + 2] = {};
+    SHFILEOPSTRUCTW op = {};
+
+    if (lpPath == NULL)
+        return FALSE;
+    if (lstrlenW(lpPath) >= MAX_FILE_PATH + 1)
+        return FALSE;
+    if (GetFileAttributesW(lpPath) == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+
+    if (!TreeCloseDocsUnderPath(lpPath))
+        return FALSE;
+
+    StringCchCopyW(szFrom, ARRAYSIZE(szFrom) - 1, lpPath);
+
+    op.hwnd = g_hWndMain;
+    op.wFunc = FO_DELETE;
+    op.pFrom = szFrom;
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+
+    if (SHFileOperationW(&op) != 0 || op.fAnyOperationsAborted)
+        return FALSE;
+
+    RefreshFileTree();
+    TreeRestoreFocus();
+    return TRUE;
+}
+
+// Desfaz renomeacao/movimentacao: move pathDst de volta para pathSrc.
+static BOOL TreeUndoRenameOrMove(void)
+{
+    WCHAR szDir[MAX_FILE_PATH];
+    BOOL isDir;
+
+    if (g_treeUndo.pathSrc.empty() || g_treeUndo.pathDst.empty())
+        return FALSE;
+    if (GetFileAttributesW(g_treeUndo.pathDst.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+    if (GetFileAttributesW(g_treeUndo.pathSrc.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+
+    StringCchCopyW(szDir, ARRAYSIZE(szDir), g_treeUndo.pathSrc.c_str());
+    PathRemoveFileSpecW(szDir);
+    if (GetFileAttributesW(szDir) == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+
+    // MOVEFILE_COPY_ALLOWED cobre volumes diferentes.
+    if (!MoveFileExW(g_treeUndo.pathDst.c_str(), g_treeUndo.pathSrc.c_str(),
+                     MOVEFILE_COPY_ALLOWED))
+        return FALSE;
+
+    isDir = PathIsDirectoryW(g_treeUndo.pathSrc.c_str());
+    TreeUpdateOpenDocsRenamed(g_treeUndo.pathDst.c_str(), g_treeUndo.pathSrc.c_str(), isDir);
+
+    if (g_treeClipboardCut && !g_treeClipboardPath.empty() &&
+        lstrcmpiW(g_treeClipboardPath.c_str(), g_treeUndo.pathDst.c_str()) == 0)
+        g_treeClipboardPath = g_treeUndo.pathSrc;
+
+    RefreshFileTree();
+    TreeSelectItemByPath(g_treeUndo.pathSrc.c_str());
+    TreeRestoreFocus();
+    return TRUE;
+}
+
+// Ctrl+Z com o foco no tree: pergunta se desfaz a ultima operacao de arquivo
+// do tree e executa. Retorna TRUE quando a tecla foi consumida; FALSE quando
+// nao ha operacao registrada (deixa o Ctrl+Z ir para o editor).
+static BOOL TreeUndoLastOperation(void)
+{
+    WCHAR szMsg[MAX_FILE_PATH + 512];
+    WCHAR szFormat[256];
+    UINT idsFormat;
+    BOOL ok = FALSE;
+    int result;
+
+    if (g_hWndTree == NULL || g_treeUndo.kind == TREE_UNDO_NONE)
+        return FALSE;
+
+    switch (g_treeUndo.kind)
+    {
+    case TREE_UNDO_RENAME: idsFormat = IDS_TREE_UNDO_RENAME; break;
+    case TREE_UNDO_MOVE:   idsFormat = IDS_TREE_UNDO_MOVE;   break;
+    case TREE_UNDO_COPY:   idsFormat = IDS_TREE_UNDO_COPY;   break;
+    case TREE_UNDO_CREATE: idsFormat = IDS_TREE_UNDO_CREATE; break;
+    case TREE_UNDO_DELETE: idsFormat = IDS_TREE_UNDO_DELETE; break;
+    default: return FALSE;
+    }
+
+    LoadStringResource(idsFormat, szFormat, ARRAYSIZE(szFormat));
+
+    switch (g_treeUndo.kind)
+    {
+    case TREE_UNDO_RENAME:
+    case TREE_UNDO_MOVE:
+        StringCchPrintfW(szMsg, ARRAYSIZE(szMsg), szFormat,
+                         PathFindFileNameW(g_treeUndo.pathSrc.c_str()),
+                         g_treeUndo.pathDst.c_str());
+        break;
+    default:
+        StringCchPrintfW(szMsg, ARRAYSIZE(szMsg), szFormat,
+                         PathFindFileNameW(g_treeUndo.pathSrc.c_str()));
+        break;
+    }
+
+    result = MessageBoxW(g_hWndMain, szMsg, NOTBAD_NAME,
+                         MB_ICONQUESTION | MB_YESNO | MB_DEFBUTTON2);
+    TreeRestoreFocus();
+    if (result != IDYES)
+        return TRUE;
+
+    switch (g_treeUndo.kind)
+    {
+    case TREE_UNDO_RENAME:
+    case TREE_UNDO_MOVE:   ok = TreeUndoRenameOrMove(); break;
+    case TREE_UNDO_COPY:
+    case TREE_UNDO_CREATE: ok = TreeUndoRecycleCreated(g_treeUndo.pathSrc.c_str()); break;
+    case TREE_UNDO_DELETE: ok = TreeUndoDeleteRestore(); break;
+    }
+
+    if (!ok)
+        TreeUndoFailed();
+    else
+        TreeUndoClear();
+
+    return TRUE;
+}
+
+// Delete com o foco no tree: confirma e move para a Lixeira, guardando um
+// vizinho para devolver o foco.
+static BOOL TreeDeleteSelected(void)
+{
+    HTREEITEM hItem;
+    HTREEITEM hSiblingItem;
+    WCHAR* pszPath;
+    WCHAR szPath[MAX_FILE_PATH];
+    WCHAR szName[MAX_PATH];
+    WCHAR szMsg[MAX_FILE_PATH + 512];
+    WCHAR szFormat[256];
+    WCHAR szSiblingPath[MAX_FILE_PATH] = L"";
+    SHFILEOPSTRUCTW op = {};
+    WCHAR szFrom[MAX_FILE_PATH + 2] = {};
+    int result;
+
+    if (g_hWndTree == NULL)
+        return FALSE;
+
+    hItem = TreeView_GetSelection(g_hWndTree);
+    if (hItem == NULL || hItem == TreeView_GetRoot(g_hWndTree))
+        return FALSE;
+
+    pszPath = GetTreeItemPath(hItem);
+    if (pszPath == NULL)
+        return FALSE;
+    StringCchCopyW(szPath, ARRAYSIZE(szPath), pszPath);
+
+    // Vizinho a guardar para devolver o foco depois.
+    hSiblingItem = TreeView_GetNextSibling(g_hWndTree, hItem);
+    if (hSiblingItem == NULL)
+        hSiblingItem = TreeView_GetPrevSibling(g_hWndTree, hItem);
+    if (hSiblingItem != NULL)
+    {
+        WCHAR* pszSibling = GetTreeItemPath(hSiblingItem);
+        if (pszSibling != NULL)
+            StringCchCopyW(szSiblingPath, ARRAYSIZE(szSiblingPath), pszSibling);
+    }
+
+    // Confirmação localizada.
+    {
+        LPCWSTR lpName = PathFindFileNameW(szPath);
+
+        StringCchCopyW(szName, ARRAYSIZE(szName),
+                       (lpName != NULL && lpName[0] != L'\0') ? lpName : szPath);
+        LoadStringResource(IDS_TREE_RECYCLE, szFormat, ARRAYSIZE(szFormat));
+        StringCchPrintfW(szMsg, ARRAYSIZE(szMsg), szFormat, szName);
+    }
+
+    result = MessageBoxW(g_hWndMain, szMsg, NOTBAD_NAME,
+                         MB_ICONQUESTION | MB_YESNO | MB_DEFBUTTON2);
+    TreeRestoreFocus();
+    if (result != IDYES)
+        return TRUE;   // consumida sem fazer nada
+
+    if (!TreeCloseDocsUnderPath(szPath))
+    {
+        TreeRestoreFocus();
+        return TRUE;   // o usuario cancelou o salvamento: aborta a exclusao
+    }
+
+    StringCchCopyW(szFrom, ARRAYSIZE(szFrom) - 1, szPath);
+    op.hwnd = g_hWndMain;
+    op.wFunc = FO_DELETE;
+    op.pFrom = szFrom;
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+
+    if (SHFileOperationW(&op) != 0 || op.fAnyOperationsAborted)
+    {
+        TreeUndoFailed();
+        return TRUE;
+    }
+
+    TreeUndoRecord(TREE_UNDO_DELETE, szPath, NULL);
+
+    if (g_treeClipboardCut && !g_treeClipboardPath.empty() &&
+        TreePathMatchesOrContains(szPath, g_treeClipboardPath.c_str()))
+    {
+        TreeClearClipboardMark();
+    }
+
+    RefreshFileTree();
+
+    // Foco no vizinho previamente guardado.
+    if (szSiblingPath[0] != L'\0')
+        TreeSelectItemByPath(szSiblingPath);
+
+    TreeRestoreFocus();
+    return TRUE;
+}
+
+static void TreeItemDragEnd(void)
+{
+    if (g_hTreeDragImage != NULL)
+    {
+        ImageList_DragLeave(g_hWndTree);
+        ImageList_EndDrag();
+        ImageList_Destroy(g_hTreeDragImage);
+        g_hTreeDragImage = NULL;
+    }
+    if (g_hWndTree != NULL)
+        TreeView_SelectDropTarget(g_hWndTree, NULL);
+    g_bTreeItemDrag = FALSE;
+    g_bTreeDragDropItem = NULL;
+    g_treeItemDragSrc.clear();
+    ReleaseCapture();   // dispara WM_CAPTURECHANGED (idempotente)
+}
+
+// Alvo valido quando soltar faz algo util: a pasta de destino e a pasta do
+// item (ou a pasta pai, se for arquivo) e, para mover, o destino nao e o
+// local atual nem uma subpasta da origem.
+static BOOL TreeDropTargetIsValid(HTREEITEM hTarget, LPCWSTR lpSrcPath, BOOL bMove)
+{
+    WCHAR szDir[MAX_FILE_PATH];
+    WCHAR szSrcDir[MAX_FILE_PATH];
+
+    if (hTarget == NULL || lpSrcPath == NULL)
+        return FALSE;
+    if (!GetTreeTargetDirectory(hTarget, szDir, ARRAYSIZE(szDir)))
+        return FALSE;
+    if (!bMove)
+        return TRUE;
+
+    StringCchCopyW(szSrcDir, ARRAYSIZE(szSrcDir), lpSrcPath);
+    PathRemoveFileSpecW(szSrcDir);
+    if (lstrcmpiW(szSrcDir, szDir) == 0)
+        return FALSE;                       // no-op: ja esta aqui
+    if (TreePathMatchesOrContains(lpSrcPath, szDir))
+        return FALSE;                       // dentro de si mesmo
+    return TRUE;
+}
+
+// Ctrl+X/C/V com o foco no tree: nossas aceleradoras globais (IDM_CUT/COPY/
+// PASTE do editor) consomem as teclas antes de o tree as ver; por isso essas
+// teclas são roteadas aqui no loop de mensagens, com o tree visível e o foco
+// nele, antes do TranslateAcceleratorW.
+BOOL HandleTreeAccelerator(MSG* pMsg)
+{
+    HTREEITEM hSel;
+    BOOL bCtrl;
+
+    if (pMsg == NULL || g_hWndTree == NULL)
+        return FALSE;
+    if (!IsWindowVisible(g_hWndTree))
+        return FALSE;
+    if (GetFocus() != g_hWndTree)
+        return FALSE;
+    if (pMsg->message != WM_KEYDOWN && pMsg->message != WM_SYSKEYDOWN)
+        return FALSE;
+    if (TreeView_GetEditControl(g_hWndTree) != NULL)
+        return FALSE;   // durante renomeacao, o campo de texto age sozinho
+
+    bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    if (!bCtrl)
+        return FALSE;
+
+    switch (pMsg->wParam)
+    {
+    case 'C':
+    case 'X':
+        hSel = TreeView_GetSelection(g_hWndTree);
+        if (hSel == NULL || hSel == TreeView_GetRoot(g_hWndTree))
+            return FALSE;
+        HandleTreeClipboardKey(hSel, (WCHAR)pMsg->wParam);
+        return TRUE;
+
+    case 'V':
+        if (g_treeClipboardPath.empty())
+            return FALSE;    // nada recortado/copiado no tree: deixa o editor colar
+        hSel = TreeView_GetSelection(g_hWndTree);
+        HandleTreeClipboardKey(hSel, 'V');
+        return TRUE;
+
+    case 'Z':
+        return TreeUndoLastOperation();
+    }
+
+    return FALSE;
+}
+
 
 static HTREEITEM BuildTreeRoot(LPCWSTR lpPath)
 {
@@ -2123,6 +3454,19 @@ static UINT GetReapplyCaretMessage(void)
     return s_msg;
 }
 
+// Mensagem postada pelo TVN_BEGINLABELEDITW: a TreeView seleciona o rótulo
+// inteiro depois de esse evento e ele apagaria a seleção que fizemos; aqui a
+// seleção do nome base (sem a extensão) é reaplicada quando o controle está
+// estabilizado.
+static UINT GetLabelSelectBaseMessage(void)
+{
+    static UINT s_msg = 0;
+
+    if (s_msg == 0)
+        s_msg = RegisterWindowMessageW(L"Notbad.LabelSelectBase");
+    return s_msg;
+}
+
 static void CheckOverwriteCaretShape(void)
 {
     Document* pDoc;
@@ -2178,6 +3522,46 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 0;
     }
 
+    // Reaplica a selecao do nome base depois de a TreeView estabilizar o
+    // controle de edicao do rotulo.
+    if (msg == GetLabelSelectBaseMessage())
+    {
+        HWND hEdit = NULL;
+
+        if (g_hWndTree != NULL)
+            hEdit = TreeView_GetEditControl(g_hWndTree);
+
+        if (hEdit != NULL)
+        {
+            WCHAR szText[MAX_PATH] = {};
+
+            GetWindowTextW(hEdit, szText, ARRAYSIZE(szText));
+
+            int len = lstrlenW(szText);
+            int selEnd = len;
+
+            HTREEITEM hItem = TreeView_GetSelection(g_hWndTree);
+            WCHAR* pszPath = (hItem != NULL) ? GetTreeItemPath(hItem) : NULL;
+            BOOL isDir = (pszPath != NULL && PathIsDirectoryW(pszPath));
+
+            if (!isDir)
+            {
+                LPCWSTR lpExt = PathFindExtensionW(szText);
+
+                if (lpExt != NULL && lpExt[0] != L'\0' && lpExt != szText)
+                {
+                    int extLen = lstrlenW(lpExt);
+
+                    if (extLen < len)
+                        selEnd = len - extLen;
+                }
+            }
+
+            SendMessageW(hEdit, EM_SETSEL, 0, (LPARAM)selEnd);
+        }
+        return 0;
+    }
+
     switch (msg)
     {
     case WM_TIMER:
@@ -2201,6 +3585,7 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         CreateLineNumbers(hWnd);
         LayoutChildren(hWnd);
         DragAcceptFiles(hWnd, TRUE);
+        AddClipboardFormatListener(hWnd);
         return 0;
 
     case WM_SIZE:
@@ -2210,6 +3595,14 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             g_pActiveDoc->bCodeHighlightViewValid = FALSE;
             EditorScheduleUniversalHighlight(g_pActiveDoc);
         }
+        return 0;
+
+    case WM_CLIPBOARDUPDATE:
+        // O usuario colocou algo novo na Area de Transferencia global: se
+        // havia um item recortado (translucido) pendente no tree, o estado
+        // dele deve voltar ao normal.
+        if (g_treeCutPending)
+            TreeClearClipboardMark();
         return 0;
 
     case WM_ERASEBKGND:
@@ -2264,6 +3657,12 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         {
             GetCursorPos(&pt);
             ScreenToClient(hWnd, &pt);
+            if (g_bTreeItemDrag)
+            {
+                SetCursor(LoadCursorW(NULL,
+                    g_bTreeDragDropItem != NULL ? IDC_SIZENS : IDC_NO));
+                return TRUE;
+            }
             if (g_bTreeDrag ||
                 (GetTreeSplitterRect(&rcSplit) && PtInRect(&rcSplit, pt)))
             {
@@ -2290,6 +3689,46 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
     }
 
     case WM_MOUSEMOVE:
+        if (g_bTreeItemDrag)
+        {
+            POINT pt;
+            HTREEITEM hTarget;
+            TVHITTESTINFO ht = {};
+            BOOL overInvalid = FALSE;
+
+            GetCursorPos(&pt);
+            ScreenToClient(g_hWndTree, &pt);
+
+            if (g_hTreeDragImage != NULL)
+                ImageList_DragMove(pt.x, pt.y);
+
+            ht.pt = pt;
+            hTarget = TreeView_HitTest(g_hWndTree, &ht);
+            if ((ht.flags & TVHT_ONITEM) == 0)
+                hTarget = NULL;
+
+            if (hTarget != NULL &&
+                !TreeDropTargetIsValid(hTarget, g_treeItemDragSrc.c_str(), TRUE))
+            {
+                hTarget = NULL;
+                overInvalid = TRUE;
+            }
+
+            g_bTreeDragDropItem = hTarget;
+            if (g_hTreeDragImage != NULL)
+                ImageList_DragShowNolock(FALSE);
+            TreeView_SelectDropTarget(g_hWndTree, hTarget);
+            if (g_hTreeDragImage != NULL)
+                ImageList_DragShowNolock(TRUE);
+
+            if (hTarget != NULL)
+                SetCursor(LoadCursorW(NULL, IDC_SIZENS));
+            else if (overInvalid)
+                SetCursor(LoadCursorW(NULL, IDC_NO));
+            else
+                SetCursor(LoadCursorW(NULL, IDC_ARROW));
+            return 0;
+        }
         if (g_bTreeDrag)
         {
             RECT rcClient;
@@ -2307,6 +3746,21 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         break;
 
     case WM_LBUTTONUP:
+        if (g_bTreeItemDrag)
+        {
+            HTREEITEM hTarget = g_bTreeDragDropItem;
+            std::wstring srcPath = g_treeItemDragSrc;
+            WCHAR szDir[MAX_FILE_PATH];
+
+            TreeItemDragEnd();
+
+            if (hTarget != NULL && !srcPath.empty() &&
+                GetTreeTargetDirectory(hTarget, szDir, ARRAYSIZE(szDir)))
+            {
+                TreeCopyOrMoveItem(srcPath.c_str(), szDir, TRUE);
+            }
+            return 0;
+        }
         if (g_bTreeDrag)
         {
             ReleaseCapture();   // dispara WM_CAPTURECHANGED (g_bTreeDrag = FALSE)
@@ -2319,6 +3773,8 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_CAPTURECHANGED:
         g_bTreeDrag = FALSE;
+        if (g_bTreeItemDrag)
+            TreeItemDragEnd();
         break;
 
     case WM_SETTINGCHANGE:
@@ -2384,6 +3840,81 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                     WCHAR* pszPath = GetTreeItemPath(pnm->itemNew.hItem);
                     if (pszPath != NULL)
                         PopulateTreeItem(pnm->itemNew.hItem, pszPath);
+                }
+                return 0;
+            }
+
+            if (hdr->code == TVN_BEGINLABELEDITW)
+            {
+                BOOL cancel = HandleTreeBeginLabelEdit((NMTVDISPINFOW*)lParam);
+                if (!cancel)
+                    PostMessageW(hWnd, GetLabelSelectBaseMessage(), 0, 0);
+                return cancel ? 1 : 0;
+            }
+
+            if (hdr->code == TVN_ENDLABELEDITW)
+            {
+                BOOL bAccepted = HandleTreeEndLabelEdit((NMTVDISPINFOW*)lParam);
+                SetWindowLongPtrW(hWnd, DWLP_MSGRESULT, bAccepted ? TRUE : FALSE);
+                return TRUE;
+            }
+
+            if (hdr->code == TVN_BEGINDRAGW)
+            {
+                NMTREEVIEWW* pnm = (NMTREEVIEWW*)lParam;
+                HTREEITEM hItem = pnm->itemNew.hItem;
+                WCHAR* pszPath = GetTreeItemPath(hItem);
+                POINT pt;
+
+                if (pszPath == NULL)
+                    return 0;
+                if (hItem == TreeView_GetRoot(g_hWndTree))
+                    return 0;   // a raiz nao se arrasta
+                if (TreeView_GetEditControl(g_hWndTree) != NULL)
+                    return 0;   // sem arrasto durante renomeacao
+
+                g_treeItemDragSrc = pszPath;
+                g_bTreeItemDrag = TRUE;
+                g_bTreeDragDropItem = NULL;
+
+                GetCursorPos(&pt);
+                ScreenToClient(g_hWndTree, &pt);
+
+                g_hTreeDragImage = TreeView_CreateDragImage(g_hWndTree, hItem);
+                if (g_hTreeDragImage != NULL)
+                {
+                    ImageList_BeginDrag(g_hTreeDragImage, 0, 0, 0);
+                    ImageList_DragEnter(g_hWndTree, pt.x, pt.y);
+                    ImageList_DragShowNolock(TRUE);
+                }
+                SetCapture(hWnd);
+                return 0;
+            }
+
+            if (hdr->code == TVN_KEYDOWN)
+            {
+                NMTVKEYDOWN* ptvkd = (NMTVKEYDOWN*)lParam;
+
+                if (ptvkd != NULL)
+                {
+                    HTREEITEM hSel = TreeView_GetSelection(g_hWndTree);
+
+                    if (ptvkd->wVKey == VK_F2 &&
+                        TreeView_GetEditControl(g_hWndTree) == NULL)
+                        TreeBeginRename(hSel);
+                    else if (ptvkd->wVKey == VK_ESCAPE)
+                    {
+                        if (g_bTreeItemDrag)
+                        {
+                            TreeItemDragEnd();
+                            return 0;
+                        }
+                    }
+                    else if (ptvkd->wVKey == VK_DELETE)
+                        TreeDeleteSelected();
+                    else if (ptvkd->wVKey == 'X' || ptvkd->wVKey == 'C' ||
+                             ptvkd->wVKey == 'V')
+                        HandleTreeClipboardKey(hSel, ptvkd->wVKey);
                 }
                 return 0;
             }
@@ -2478,7 +4009,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         switch (id)
         {
         case IDM_NEW:
-            EditorNew();
+            if (GetFocus() == g_hWndTree)
+                TreeCreateNewFile();
+            else
+                EditorNew();
             return 0;
 
         case IDM_OPEN:

@@ -227,6 +227,17 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
         EditorScheduleUniversalHighlight(pDoc);
     }
 
+    // O RichEdit refaz o layout da linha nova recem-inserida pelo Enter e
+    // recria o caret fino depois do DefSubclassProc; no Overwrite o caret
+    // precisa voltar a ser o sublinhado depois de cada pintura, senao a barra
+    // fina "volta" visualmente ate o usuario digitar.
+    if (msg == WM_PAINT && pDoc != NULL)
+    {
+        if (pDoc->bOverwrite)
+            EditorUpdateCaretShape(hWnd);
+        EditorPaintEmptyLineHighlight(hWnd, pDoc);
+    }
+
     return result;
 }
 
@@ -717,7 +728,10 @@ BOOL DocSaveFile(Document* pDoc, LPCWSTR lpFileName)
 
     result = SaveTextFile(lpFileName, lpText, pDoc->encoding);
     if (result)
+    {
         pDoc->bReinterpreted = FALSE;
+        RefreshFileTreeView();
+    }
 
     LocalFree(lpText);
     return result;
@@ -742,6 +756,8 @@ static BOOL SaveWithDialog(Document* pDoc)
                      L"%s%c*.txt%c%s%c*.*%c",
                      szText, L'\0', L'\0', szAll, L'\0', L'\0');
 
+    WCHAR szStartDir[MAX_PATH] = {};
+
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = g_hWndMain;
@@ -749,6 +765,8 @@ static BOOL SaveWithDialog(Document* pDoc)
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = ARRAYSIZE(szFile);
     ofn.lpstrDefExt = L"txt";
+    if (GetTreeTargetDirectoryForSave(szStartDir, ARRAYSIZE(szStartDir)))
+        ofn.lpstrInitialDir = szStartDir;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_EXPLORER;
 
     if (!GetSaveFileNameW(&ofn))

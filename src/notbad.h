@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.7"
+#define NOTBAD_VERSION     L"1.0.8"
 #define NOTBAD_HELP_URL    L"https://aless-maulsmoke.github.io/Notbad/"
 #define NOTBAD_VERSION_URL L"https://aless-maulsmoke.github.io/Notbad/version.html"
 #define NOTBAD_RELEASES_URL L"https://github.com/Aless-MaulSmoke/Notbad/releases"
@@ -156,6 +156,9 @@ void UpdateEditMenuState(HWND hWnd);
 void LayoutMainWindow(void);
 void InvalidateLineNumbers(void);
 void UpdateTreeOpenMarks(void);
+void RefreshFileTreeView(void);
+BOOL GetTreeTargetDirectoryForSave(LPWSTR lpDir, int cchDir);
+BOOL HandleTreeAccelerator(MSG* pMsg);
 LPCWSTR TabGetClosePadding(void);
 
 // document.cpp
@@ -218,6 +221,7 @@ void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen);
 void EditorClearCurrentLineHighlight(Document* pDoc);
 void EditorUpdateCaretShape(HWND hEdit);
 void EditorResetCaretShape(void);
+void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc);
 void EditorHandleOverwriteChar(HWND hEdit, WCHAR ch);
 BOOL EditorTryOverwriteChar(HWND hEdit, WCHAR ch);
 void EditorPlaceCaretAtClick(HWND hEdit);

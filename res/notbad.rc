@@ -147,6 +147,13 @@ BEGIN
     IDS_STATUS_AUTOINDENT "Auto-indent"
     IDS_ENC_UTF8BOM     "UTF-8 with BOM"
     IDS_NEW_VERSION     "A new version of Notbad is available: %s\n\nYou are using version %s.\n\nOpen the download page?"
+    IDS_TREE_RECYCLE    "Move ""%s"" to the Recycle Bin?"
+    IDS_TREE_UNDO_RENAME "Undo the rename of ""%s"" to ""%s""?"
+    IDS_TREE_UNDO_MOVE  "Undo moving ""%s"" to ""%s""?"
+    IDS_TREE_UNDO_COPY  "Undo the copy created in ""%s""?"
+    IDS_TREE_UNDO_CREATE "Undo the creation of ""%s""?"
+    IDS_TREE_UNDO_DELETE "Restore ""%s"" from the Recycle Bin?"
+    IDS_TREE_UNDO_FAILED "The operation could not be undone."
 END
 
 IDD_ABOUT DIALOGEX 0, 0, 340, 186
@@ -156,7 +163,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_ABOUT_IMAGE, "Static", SS_BITMAP | SS_REALSIZECONTROL, 12, 12, 64, 64
     LTEXT           "Notbad", IDC_ABOUT_NAME, 88, 14, 240, 14
-    LTEXT           "Version 1.0.7", IDC_ABOUT_VERSION, 88, 30, 240, 10
+    LTEXT           "Version 1.0.8", IDC_ABOUT_VERSION, 88, 30, 240, 10
     LTEXT           "A modern and ""notbad"" reimagining of the traditional notepad text editor, keeping the lightweight soul you love with the power features you need.", IDC_ABOUT_COPYRIGHT, 88, 48, 240, 44
     LTEXT           "Project Team:", IDC_ABOUT_TEAM_LABEL, 12, 112, 316, 10
     LTEXT           "* Aless MaulSmoke: Project Manager | Concept | Code Review", IDC_ABOUT_TEAM1, 16, 128, 312, 10
@@ -233,11 +240,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Notbad"
             VALUE "FileDescription", "Notbad"
-            VALUE "FileVersion", "1.0.7.0"
+            VALUE "FileVersion", "1.0.8.0"
             VALUE "InternalName", "Notbad"
             VALUE "OriginalFilename", "Notbad.exe"
             VALUE "ProductName", "Notbad"
-            VALUE "ProductVersion", "1.0.7.0"
+            VALUE "ProductVersion", "1.0.8.0"
         END
     END
     BLOCK "VarFileInfo"

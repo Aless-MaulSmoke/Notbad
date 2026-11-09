@@ -133,3 +133,10 @@
 #define IDS_STATUS_AUTOINDENT       0x2016
 #define IDS_ENC_UTF8BOM             0x2017
 #define IDS_NEW_VERSION             0x2018
+#define IDS_TREE_RECYCLE            0x2019
+#define IDS_TREE_UNDO_RENAME        0x201A
+#define IDS_TREE_UNDO_MOVE          0x201B
+#define IDS_TREE_UNDO_COPY          0x201C
+#define IDS_TREE_UNDO_CREATE        0x201D
+#define IDS_TREE_UNDO_DELETE        0x201E
+#define IDS_TREE_UNDO_FAILED        0x201F

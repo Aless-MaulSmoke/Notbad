@@ -1338,6 +1338,103 @@ static BOOL GetCaretMetrics(HWND hEdit, int caret, BOOL bOverwrite,
 // Aplica a forma do caret conforme o modo do documento. Chamado quando a
 // selecao ou o texto mudam, no foco e depois de a tecla Insert alternar o modo.
 // No modo Insert so age se antes houve um caret em bloco a desfazer.
+// Realce da linha atual por retangulo desenhado DEPOIS do WM_PAINT do
+// RichEdit, usado quando a linha do caret esta vazia no fim do texto (ex.:
+// documento novo ou ultima linha vazia): nao ha caractere para o caminho
+// normal de formatacao pintar. Nao ha cache nem invalidacao — o RichEdit
+// repinta o fundo da area a cada WM_PAINT e aqui so desenhamos se for caso.
+void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
+{
+    GETTEXTLENGTHEX gtl = {};
+    int selStart;
+    int selEnd;
+    int caret;
+    int zoomNum = 1;
+    int zoomDen = 1;
+    POINT pt = {};
+    RECT rcView = {};
+    RECT rcClient = {};
+    RECT rc = {};
+    HDC hdc = NULL;
+    HGDIOBJ oldFont = NULL;
+    TEXTMETRICW tm = {};
+    static HBRUSH s_brushHighlight = NULL;
+    int para;
+    int start;
+    int nextStart;
+    int lineHeight;
+
+    if (!g_settings.highlightCurrentLine)
+        return;
+    if (hEdit == NULL || pDoc == NULL)
+        return;
+    if (pDoc != g_pActiveDoc)
+        return;
+
+    GetEditSelection(hEdit, &selStart, &selEnd);
+    if (selEnd != selStart)
+        return;
+    caret = selEnd;
+
+    para = EditorGetParagraphNumber(hEdit, caret);
+    start = EditorGetParagraphStart(hEdit, caret);
+    nextStart = EditorGetParagraphStartByNumber(hEdit, para + 1);
+
+    // Se a proxima linha comeca depois do inicio desta, a linha do caret nao
+    // esta vazia — o caminho normal de formatacao cobre o realce.
+    if (nextStart > start)
+        return;
+
+    SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, caret);
+
+    // Altura da linha com o mesmo calculo do caret de bloco.
+    SendMessageW(hEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
+    if (zoomNum <= 0 || zoomDen <= 0)
+    {
+        zoomNum = 1;
+        zoomDen = 1;
+    }
+
+    hdc = GetDC(hEdit);
+    if (hdc == NULL)
+        return;
+    oldFont = SelectObject(hdc, g_hFont != NULL ? (HGDIOBJ)g_hFont
+                                                 : GetStockObject(SYSTEM_FIXED_FONT));
+    GetTextMetricsW(hdc, &tm);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(hEdit, hdc);
+
+    lineHeight = MulDiv((int)tm.tmHeight, zoomNum, zoomDen);
+    if (lineHeight < 1)
+        lineHeight = 1;
+
+    SendMessageW(hEdit, EM_GETRECT, 0, (LPARAM)&rcView);
+    GetClientRect(hEdit, &rcClient);
+
+    if (rcView.left >= rcView.right || rcView.top >= rcView.bottom)
+        return;
+    if (pt.y >= rcView.bottom || pt.y + lineHeight <= rcView.top)
+        return;
+
+    rc.left = rcView.left;
+    rc.right = rcView.right;
+    rc.top = pt.y;
+    rc.bottom = pt.y + lineHeight;
+    if (rc.bottom > rcView.bottom)
+        rc.bottom = rcView.bottom;
+    if (rc.top < rcView.top)
+        rc.top = rcView.top;
+
+    if (s_brushHighlight == NULL)
+        s_brushHighlight = CreateSolidBrush(NOTBAD_HIGHLIGHT_COLOR);
+
+    hdc = GetDC(hEdit);
+    if (hdc == NULL)
+        return;
+    FillRect(hdc, &rc, s_brushHighlight);
+    ReleaseDC(hEdit, hdc);
+}
+
 void EditorUpdateCaretShape(HWND hEdit)
 {
     Document* pDoc;

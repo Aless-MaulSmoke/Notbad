@@ -72,7 +72,14 @@ static const LangIdEntry s_idsTable[] =
     NB_IDS(IDS_REPLACED_COUNT),
     NB_IDS(IDS_STATUS_AUTOINDENT),
     NB_IDS(IDS_ENC_UTF8BOM),
-    NB_IDS(IDS_NEW_VERSION)
+    NB_IDS(IDS_NEW_VERSION),
+    NB_IDS(IDS_TREE_RECYCLE),
+    NB_IDS(IDS_TREE_UNDO_RENAME),
+    NB_IDS(IDS_TREE_UNDO_MOVE),
+    NB_IDS(IDS_TREE_UNDO_COPY),
+    NB_IDS(IDS_TREE_UNDO_CREATE),
+    NB_IDS(IDS_TREE_UNDO_DELETE),
+    NB_IDS(IDS_TREE_UNDO_FAILED)
 };
 
 // Itens de menu: o comando (ID) e a chave do texto, que inclui o "\tCtrl+X".

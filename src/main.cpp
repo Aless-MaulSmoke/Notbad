@@ -312,6 +312,9 @@ int RunMessageLoop(void)
         if (g_hFindDialog != NULL && IsDialogMessageW(g_hFindDialog, &msg))
             continue;
 
+        if (HandleTreeAccelerator(&msg))
+            continue;
+
         if (g_hAccel != NULL && TranslateAcceleratorW(g_hWndMain, g_hAccel, &msg))
             continue;
 

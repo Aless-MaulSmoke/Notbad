@@ -1,5 +1,27 @@
 # CHANGELOG IN STEPS
 
+## v1.0.8 - 11/09/2026
+
+### FIXES
+
+#### Editing:
+* **Visual change to the keyboard cursor state:** In an empty file, with the cursor in Replace mode. Pressing ENTER would change the keyboard cursor state, but only visually.
+* **Highlight Line:** Line highlighting never worked with the cursor at the beginning of an empty line.
+
+#### File Tree
+* **Update content:** When saving a file in the editor, it is now automatically listed in the Tree View.
+* **Save location selection:** Now, when saving a file, the recommended save location will be the folder that is in focus in the Tree View.
+
+### IMPLEMENTATIONS
+
+#### File Tree
+* **File operations via keyboard:** It is now possible to perform operations such as: Create (Ctrl+N), Rename (F2), Copy|Cut|Paste (Ctrl+C|X|V), and Delete (Del). You must be inside the File Tree to perform these operations.
+* **Undo:** The last file operation can be undone with (Ctrl+Z).
+* **Move with Mouse:** It is now possible to move folders or files in the File Tree.
+
+---
+
+
 ## v1.0.7 - 11/08/2026
 
 ### FIXES
@@ -193,6 +215,6 @@
 ## v1.0 — Initial Base
 
 ### IMPLEMENTATIONS
-* **Notepad Recompilation:** Recompilation of Notepad via Ghidra.
+* **Project Start:** Ground-up reimplementation of a classic Notepad-like editor.
 * **Initial Version:** Initial version in C++ (toolset v141 / VS 2017) produced with opencode.
 * **Core Features:** Single document, classic Edit, menu and shortcuts, encoding, native find/replace, printing, font, and registry configurations.

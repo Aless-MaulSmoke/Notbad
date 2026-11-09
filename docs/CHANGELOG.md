@@ -1,5 +1,36 @@
 # CHANGELOG IN STEPS
 
+## v1.0.7 - 11/08/2026
+
+### FIXES
+
+#### Editing
+* **Replace All Undo Across Tabs:** Undoing a Replace All done with "All open files" now reverts the change in every affected tab with a single Undo.
+* **Undo Selection:** After undoing a Replace, the restored text is no longer left selected.
+* **Resize File Tree:** Resizing the file tree no longer paints the whole editor with the current line highlight color.
+* **Replace Undo:** The Replace option in the Edit menu can now be undone, including when using the checkbox to replace in all files.
+
+#### Interface
+* **Empty File Scrollbar:** Opening Notbad with an empty file no longer shows the scroll bar at the bottom. It now appears only when the file has text and word wrap is off.
+
+#### Version Check
+* **Older Remote Version:** Notbad no longer warns about an update when the online version is older than the one you are using. You are only notified when a newer version is available.
+
+#### Code Highlighting
+* **Faster Typing:** Typing in code with highlighting is now faster. While you type, only the line you are editing is updated instead of the whole visible area.
+
+### IMPLEMENTATIONS
+
+#### Interface
+* **Focus Navigation:** `Ctrl+1` moves you to the file tree when it is visible; `Ctrl+2` takes you back to the editor.
+
+#### Menus
+* **Find Previous:** Added Edit > Find Previous (`Shift+F3`) right below Find Next.
+* **Zoom Menu:** Added View > Zoom as the first option, with Zoom In (`Ctrl++`), Zoom Out (`Ctrl+-`) and Reset Zoom (`Ctrl+0`). The zoom applies to every open tab.
+
+---
+
+
 ## v1.0.6 - 11/06/2026
 
 ### FIXES

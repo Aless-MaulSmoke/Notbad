@@ -175,6 +175,16 @@ static LRESULT CALLBACK RichEditSubclassProc(HWND hWnd, UINT msg, WPARAM wParam,
         EditorResetCaretStyle(hWnd);
     }
 
+    // O Enter nativo (sem auto-indent ou no inicio de uma linha vazia) recria
+    // o caret como barra no fim da mensagem; no Overwrite ele precisa voltar a
+    // ser o sublinhado.
+    if (pDoc != NULL && pDoc->bOverwrite &&
+        ((msg == WM_KEYDOWN && wParam == VK_RETURN) ||
+         (msg == WM_CHAR && wParam == L'\r')))
+    {
+        EditorUpdateCaretShape(hWnd);
+    }
+
     if (msg == WM_SETFOCUS)
     {
         EditorPlaceCaretAtClick(hWnd);
@@ -643,6 +653,7 @@ BOOL DocLoad(Document* pDoc, LPCWSTR lpFileName)
 
     // Trocar o texto pode redefinir a largura do tab do RichEdit.
     EditorApplyTabWidthTo(pDoc->hEdit);
+    EditorUpdateHorizontalScrollBar(pDoc->hEdit);
 
     StringCchCopyW(pDoc->szFilePath, ARRAYSIZE(pDoc->szFilePath), lpFileName);
     StringCchCopyW(pDoc->szFileTitle, ARRAYSIZE(pDoc->szFileTitle),

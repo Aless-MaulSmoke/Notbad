@@ -275,6 +275,95 @@ void EditorSyncZoomFrom(HWND hSource)
     }
 }
 
+// Aplica o zoom global em todas as abas e refaz o que depende da escala.
+static void EditorApplyZoomToAll(void)
+{
+    size_t i;
+
+    for (i = 0; i < g_documents.size(); ++i)
+    {
+        g_documents[i]->bCodeHighlightViewValid = FALSE;
+        EditorApplyGlobalZoomTo(g_documents[i]->hEdit);
+    }
+
+    InvalidateLineNumbers();
+
+    if (g_hWndEdit != NULL)
+    {
+        EditorUpdateCurrentLineHighlight(g_hWndEdit);
+        EditorUpdateCaretShape(g_hWndEdit);
+    }
+
+    if (g_pActiveDoc != NULL)
+    {
+        EditorRestartUniversalHighlight(g_pActiveDoc, FALSE);
+        EditorProcessViewportHighlight();
+    }
+}
+
+// Passo de zoom pelos niveis conhecidos (Ctrl++ / Ctrl+-). 0/0 desliga o zoom.
+void EditorZoom(int direction)
+{
+    static const int levels[] = { 50, 75, 100, 125, 150, 200, 300, 400 };
+    int num = 0;
+    int den = 0;
+    int percent = 100;
+    int target;
+    size_t i;
+
+    if (g_hWndEdit == NULL || !IsWindow(g_hWndEdit))
+        return;
+
+    EditorReadZoom(g_hWndEdit, &num, &den);
+    if (num > 0 && den > 0)
+        percent = MulDiv(num, 100, den);
+
+    if (direction > 0)
+    {
+        target = levels[ARRAYSIZE(levels) - 1];
+        for (i = 0; i < ARRAYSIZE(levels); ++i)
+        {
+            if (levels[i] > percent)
+            {
+                target = levels[i];
+                break;
+            }
+        }
+    }
+    else
+    {
+        target = levels[0];
+        for (i = 0; i < ARRAYSIZE(levels); ++i)
+        {
+            if (levels[i] < percent)
+                target = levels[i];
+        }
+    }
+
+    if (target == 100)
+    {
+        s_zoomNum = 0;
+        s_zoomDen = 0;
+    }
+    else
+    {
+        s_zoomNum = target;
+        s_zoomDen = 100;
+    }
+
+    EditorApplyZoomToAll();
+}
+
+void EditorZoomReset(void)
+{
+    if (g_hWndEdit == NULL || !IsWindow(g_hWndEdit))
+        return;
+
+    s_zoomNum = 0;
+    s_zoomDen = 0;
+    EditorApplyZoomToAll();
+}
+
 void EditorSetFont(HFONT hFont)
 {
     size_t i;
@@ -840,25 +929,46 @@ void EditorUpdateIndentBlock(HWND hEdit, int caret, int textLen)
     pTextDoc->Release();
 }
 
+// Em arquivo vazio o RichEdit mantem a barra de rolagem horizontal visivel por
+// causa de WS_HSCROLL. O estilo e removido enquanto nao houver conteudo (ou
+// enquanto o word wrap estiver ligado) e devolvido quando o texto aparecer.
+void EditorUpdateHorizontalScrollBar(HWND hEdit)
+{
+    GETTEXTLENGTHEX gtl = { GTL_DEFAULT | GTL_NUMCHARS, 1200 };
+    LONG_PTR style;
+    LONG_PTR wanted;
+    int textLen;
+
+    if (hEdit == NULL || !IsWindow(hEdit))
+        return;
+
+    textLen = (int)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+
+    style = GetWindowLongPtrW(hEdit, GWL_STYLE);
+    wanted = style;
+
+    if (!g_settings.wordWrap && textLen > 0)
+        wanted |= WS_HSCROLL | ES_AUTOHSCROLL;
+    else
+        wanted &= ~(WS_HSCROLL | ES_AUTOHSCROLL);
+
+    if (wanted == style)
+        return;
+
+    SetWindowLongPtrW(hEdit, GWL_STYLE, wanted);
+    SetWindowPos(hEdit, NULL, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+}
+
 // No RichEdit o estilo sozinho nao controla a quebra: e preciso mandar
 // EM_SETTARGETDEVICE com lParam 0 (quebra na janela) ou 1 (sem quebra).
 void EditorApplyWordWrapTo(HWND hEdit, BOOL bWrap)
 {
-    LONG_PTR style;
-
     if (hEdit == NULL)
         return;
 
-    style = GetWindowLongPtrW(hEdit, GWL_STYLE);
-    if (bWrap)
-        style &= ~(WS_HSCROLL | ES_AUTOHSCROLL);
-    else
-        style |= WS_HSCROLL | ES_AUTOHSCROLL;
-
-    SetWindowLongPtrW(hEdit, GWL_STYLE, style);
     SendMessageW(hEdit, EM_SETTARGETDEVICE, 0, bWrap ? 0 : 1);
-    SetWindowPos(hEdit, NULL, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    EditorUpdateHorizontalScrollBar(hEdit);
     InvalidateRect(hEdit, NULL, TRUE);
 }
 
@@ -998,6 +1108,7 @@ static void ReplaceTextAfterReinterpret(Document* pDoc, LPCWSTR lpNew)
 
     // Trocar o texto pode redefinir a largura do tab do RichEdit.
     EditorApplyTabWidthTo(pDoc->hEdit);
+    EditorUpdateHorizontalScrollBar(pDoc->hEdit);
 
     // O comprimento pode ter mudado; o RichEdit limita a selecao ao fim.
     SendMessageW(pDoc->hEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
@@ -2246,7 +2357,7 @@ void EditorRestartUniversalHighlight(Document* pDoc, BOOL bClear)
     EditorCancelUniversalHighlightFor(pDoc);
 
     pDoc->bCodeHighlightParaValid = FALSE;
-    pDoc->bCodeHighlightTextDirty = TRUE;
+    pDoc->bCodeHighlightParaDirty = TRUE;
     pDoc->bCodeHighlightViewValid = FALSE;
     pDoc->bCodeHighlightSynced = TRUE;
 
@@ -2279,16 +2390,16 @@ void EditorInvalidateUniversalHighlight(Document* pDoc)
     if (pDoc == NULL)
         return;
 
-    // A edicao invalida o trecho realcado da linha atual; ela e recalculada
-    // imediatamente por EditorUpdateCurrentLineHighlight, que tambem limpa o
-    // flag de sujeira. O bloco visivel so e refeito se o texto realmente sair
-    // da faixa ja processada (ex.: colar/apagar varias linhas).
-    pDoc->bCodeHighlightTextDirty = TRUE;
+    // Estado de edicao: apenas o paragrafo atual (e o anterior, quando uma
+    // quebra de linha muda o look-behind) e refeito, na hora, por
+    // EditorUpdateCurrentLineHighlight. Digitar nao agenda o viewport; o bloco
+    // visivel so e reformatado quando a tela realmente mudar (scroll, resize,
+    // zoom, troca de aba) ou numa edicao em lote (colar, recortar, undo).
+    pDoc->bCodeHighlightParaDirty = TRUE;
 
-    if (!g_settings.codeHighlighting)
-        return;
-
-    EditorScheduleUniversalHighlight(pDoc);
+    // Depois da edicao os limites absolutos do cache do viewport nao
+    // correspondem mais ao texto; a proxima atualizacao de viewport recalcula.
+    pDoc->bCodeHighlightViewValid = FALSE;
 }
 
 static BOOL EditorGetViewportRange(HWND hEdit, int* pVisibleStart, int* pVisibleEnd,
@@ -2431,7 +2542,7 @@ static BOOL EditorApplyViewportHighlight(Document* pDoc)
     DWORD oldMask;
     BOOL modified;
     BOOL bVisible;
-    BOOL wasDirty;
+    BOOL wasParaDirty;
     int selStart;
     int selEnd;
 
@@ -2442,11 +2553,12 @@ static BOOL EditorApplyViewportHighlight(Document* pDoc)
         return FALSE;
 
     // Enquanto a tela continuar dentro do bloco ja processado, nada a refazer:
-    // rolar de pouco em pouco nao pode reaplicar o realce a cada passo.
+    // rolar de pouco em pouco nao pode reaplicar o realce a cada passo. O
+    // estado de edicao nao entra aqui: toda edicao ja zera ViewValid, entao
+    // uma faixa marcada como valida esta de fato em dia com o texto.
     if (pDoc->bCodeHighlightViewValid &&
         visStart >= pDoc->codeHighlightViewStart &&
-        visEnd <= pDoc->codeHighlightViewEnd &&
-        !pDoc->bCodeHighlightTextDirty)
+        visEnd <= pDoc->codeHighlightViewEnd)
     {
         return FALSE;
     }
@@ -2455,7 +2567,7 @@ static BOOL EditorApplyViewportHighlight(Document* pDoc)
     if (pTextDoc == NULL)
         return FALSE;
 
-    wasDirty = pDoc->bCodeHighlightTextDirty;
+    wasParaDirty = pDoc->bCodeHighlightParaDirty;
 
     bVisible = (GetWindowLongPtrW(pDoc->hEdit, GWL_STYLE) & WS_VISIBLE) != 0;
 
@@ -2479,7 +2591,7 @@ static BOOL EditorApplyViewportHighlight(Document* pDoc)
     // Ao desligar o highlighting o texto visivel volta ao normal, mas o RichEdit
     // mantem o formato em cache e o desenho do caret do ponto de insercao. Refaz
     // a partir do vizinho ja limpo para o cursor nao continuar italico.
-    if (!g_settings.codeHighlighting && wasDirty &&
+    if (!g_settings.codeHighlighting && wasParaDirty &&
         selEnd <= selStart && selStart >= start && selStart <= end)
     {
         EditorRefreshInsertionPoint(pDoc->hEdit, selStart);
@@ -2498,8 +2610,9 @@ static BOOL EditorApplyViewportHighlight(Document* pDoc)
 
     pDoc->codeHighlightViewStart = start;
     pDoc->codeHighlightViewEnd = end;
+    pDoc->codeHighlightViewFirstLine = (int)SendMessageW(pDoc->hEdit, EM_GETFIRSTVISIBLELINE, 0, 0);
     pDoc->bCodeHighlightViewValid = TRUE;
-    pDoc->bCodeHighlightTextDirty = FALSE;
+    pDoc->bCodeHighlightParaDirty = FALSE;
     pDoc->bCodeHighlightParaValid = FALSE;
 
     return TRUE;
@@ -2548,6 +2661,44 @@ static void EditorClearSelectionStyle(ITextDocument* pTextDoc)
         }
         pSel->Release();
     }
+}
+
+// Deixa o formato de insercao neutro antes de colar. O RichEdit herda o
+// formato do ponto de insercao, e a linha em destaque (fundo cinza + texto
+// preto) acabava aparecendo no bloco colado por um instante.
+static void EditorResetTypingFormatForPaste(HWND hEdit)
+{
+    ITextDocument* pTextDoc;
+    ITextSelection* pSel = NULL;
+    ITextFont* pFont = NULL;
+    DWORD oldMask;
+    BOOL modified;
+
+    pTextDoc = EditorGetTextDocument(hEdit);
+    if (pTextDoc == NULL)
+        return;
+
+    oldMask = (DWORD)SendMessageW(hEdit, EM_SETEVENTMASK, 0, 0);
+    modified = (BOOL)SendMessageW(hEdit, EM_GETMODIFY, 0, 0);
+    pTextDoc->Undo(tomSuspend, NULL);
+
+    if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
+    {
+        if (SUCCEEDED(pSel->GetFont(&pFont)) && pFont != NULL)
+        {
+            pFont->SetBold(tomFalse);
+            pFont->SetItalic(tomFalse);
+            pFont->SetBackColor(tomAutoColor);
+            pFont->SetForeColor(NOTBAD_TEXT_COLOR);
+            pFont->Release();
+        }
+        pSel->Release();
+    }
+
+    pTextDoc->Undo(tomResume, NULL);
+    pTextDoc->Release();
+    SendMessageW(hEdit, EM_SETMODIFY, modified, 0);
+    SendMessageW(hEdit, EM_SETEVENTMASK, 0, (LPARAM)oldMask);
 }
 
 // Faz o RichEdit refazer o ponto de insercao: formato de quem digita e o
@@ -2656,6 +2807,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     BOOL lineSame;
     BOOL selSame;
     BOOL insInside;
+    BOOL insSamePara;
     BOOL codeDirty;
     long oldStart = 0;
     long oldEnd = 0;
@@ -2683,12 +2835,16 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     start = EditorGetParagraphStart(hEdit, lineCaret);
     nextStart = EditorGetParagraphStartByNumber(hEdit, para + 1);
 
-    storyEnd = textLen + 1;
+    // O RichEdit mantem um paragrafo final virtual na posicao textLen. Pintar
+    // essa marca com SES_EXTENDBACKCOLOR fazia o fundo do realce cobrir toda a
+    // viewport quando a janela era redimensionada. A ultima linha e destacada
+    // apenas no texto real.
+    storyEnd = textLen;
     end = nextStart > start ? nextStart : storyEnd;
     if (end > storyEnd)
         end = storyEnd;
-    if (end <= start)
-        end = start + 1;
+    if (end < start)
+        end = start;
 
     wantLine = g_settings.highlightCurrentLine;
     wantSel = selEnd > selStart;
@@ -2719,7 +2875,16 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     if (insLen > caret)
         insLen = caret;
 
+    // So pinta o trecho inserido como "linha ativa" quando ele nao atravessa
+    // paragrafos. Colar um bloco de varias linhas nao pode herdar o fundo da
+    // linha em destaque por um instante.
+    insSamePara = FALSE;
+    if (insLen > 0)
+        insSamePara = (EditorGetParagraphNumber(hEdit, caret - insLen) ==
+                       EditorGetParagraphNumber(hEdit, caret));
+
     insInside = wantLine && lineSame && pDoc->pHighlightRange != NULL &&
+                insSamePara &&
                 (caret - insLen) >= start && caret <= end;
 
     prevSelLen = pDoc->fgPrevSelLen;
@@ -2730,7 +2895,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     needInsFix = insLen > 0;
     (void)prevSelLen;
 
-    codeDirty = g_settings.codeHighlighting && pDoc->bCodeHighlightTextDirty;
+    codeDirty = g_settings.codeHighlighting && pDoc->bCodeHighlightParaDirty;
 
     // codeDirty: houve edicao de texto (EN_CHANGE) e o realce do codigo precisa
     // ser recalculado. Sem isso, apagar um caractere (Backspace/Delete) com a
@@ -2843,7 +3008,7 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
             pDoc->codeHighlightParaStart = hlStart;
             pDoc->codeHighlightParaEnd = end;
             pDoc->bCodeHighlightParaValid = TRUE;
-            pDoc->bCodeHighlightTextDirty = FALSE;
+            pDoc->bCodeHighlightParaDirty = FALSE;
         }
     }
     // ===================================================================
@@ -2864,7 +3029,13 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
 
         if (SUCCEEDED(pTextDoc->GetSelection(&pSel)) && pSel != NULL)
         {
-            EditorPaintLineRange(pSel, wantLine);
+            // No fim do texto o RichEdit formata a marca de paragrafo virtual.
+            // Dar fundo a ela (com SES_EXTENDBACKCOLOR) pintava a viewport
+            // inteira ao redimensionar a janela; ali so a cor do texto muda.
+            if (wantLine && caret >= textLen)
+                EditorPaintSelectionRange(pSel, TRUE);
+            else
+                EditorPaintLineRange(pSel, wantLine);
             pSel->Release();
         }
     }
@@ -3133,6 +3304,7 @@ BOOL EditorPasteFromClipboard(HWND hEdit)
         }
     }
 
+    EditorResetTypingFormatForPaste(hEdit);
     SendMessageW(hEdit, EM_REPLACESEL, TRUE, (LPARAM)normalized.c_str());
     EditorRefreshAfterClipboardEdit(hEdit);
     return TRUE;

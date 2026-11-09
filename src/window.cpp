@@ -6,6 +6,20 @@
 #include <string>
 #include <vector>
 
+// Depois de um Undo o RichEdit costuma restaurar a selecao do trecho desfeito.
+// O usuario espera ver o texto restaurado normal, com o cursor no inicio.
+static void CollapseSelectionAfterUndo(HWND hEdit)
+{
+    CHARRANGE cr = {};
+
+    if (hEdit == NULL)
+        return;
+
+    SendMessageW(hEdit, EM_EXGETSEL, 0, (LPARAM)&cr);
+    if (cr.cpMax > cr.cpMin)
+        SendMessageW(hEdit, EM_SETSEL, cr.cpMin, cr.cpMin);
+}
+
 static int GetTabBarHeight(void)
 {
     RECT rc;
@@ -2404,9 +2418,26 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 if (pSelDoc != NULL && pSelDoc->bOverwrite)
                     PostMessageW(hWnd, GetReapplyCaretMessage(), 0, (LPARAM)hdr->hwndFrom);
 
-                // Se a selecao rolou a tela, o realce acompanha no proximo timer.
+                // Ctrl+Home, PageUp/PageDown e cliques que rolam a tela nao
+                // passam por EN_VSCROLL. Comparar a primeira linha visivel
+                // cobre esses saltos sem reagendar o viewport a cada tecla.
                 if (pSelDoc != NULL)
-                    EditorScheduleUniversalHighlight(pSelDoc);
+                {
+                    CHARRANGE cr = {};
+                    int firstVisible;
+
+                    SendMessageW(hdr->hwndFrom, EM_EXGETSEL, 0, (LPARAM)&cr);
+                    firstVisible = (int)SendMessageW(hdr->hwndFrom,
+                                                    EM_GETFIRSTVISIBLELINE, 0, 0);
+
+                    if (firstVisible != pSelDoc->codeHighlightViewFirstLine ||
+                        cr.cpMax < pSelDoc->codeHighlightViewStart ||
+                        cr.cpMax > pSelDoc->codeHighlightViewEnd)
+                    {
+                        pSelDoc->codeHighlightViewFirstLine = firstVisible;
+                        EditorScheduleUniversalHighlight(pSelDoc);
+                    }
+                }
             }
             UpdateStatusBar();
             UpdateEditMenuState(hWnd);
@@ -2426,7 +2457,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         {
             if (code == EN_CHANGE)
             {
+                // Qualquer edicao nova quebra o agrupamento do Replace All.
+                pCtlDoc->bReplaceAllPending = FALSE;
                 DocUpdateTabTitle(pCtlDoc);
+                EditorUpdateHorizontalScrollBar(hCtl);
                 if (pCtlDoc == g_pActiveDoc)
                 {
                     UpdateWindowTitle();
@@ -2481,6 +2515,16 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         case IDM_TREE:
             ToggleFileTree();
+            return 0;
+
+        case IDM_FOCUS_TREE:
+            if (g_hWndTree != NULL && IsWindowVisible(g_hWndTree))
+                SetFocus(g_hWndTree);
+            return 0;
+
+        case IDM_FOCUS_EDIT:
+            if (g_hWndEdit != NULL)
+                SetFocus(g_hWndEdit);
             return 0;
 
         case IDM_LINENUMBERS:
@@ -2538,28 +2582,49 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         case IDM_UNDO:
             if (g_hWndEdit != NULL)
             {
-                SendMessageW(g_hWndEdit, EM_UNDO, 0, 0);
-
-                // CORREÇÃO: Se estiver no modo Overwrite/Ins, remove a seleção residual do Undo
                 Document* pDoc = DocFromEdit(g_hWndEdit);
-                if (pDoc != NULL && pDoc->bOverwrite)
+
+                // Replace All em todas as abas e uma acao unica: desfaz em cada
+                // aba marcada e limpa as marcacoes.
+                if (pDoc != NULL && pDoc->bReplaceAllPending)
                 {
-                    CHARRANGE cr = {};
-                    SendMessageW(g_hWndEdit, EM_EXGETSEL, 0, (LPARAM)&cr);
-                    
-                    // Se houver uma seleção ativa (área marcada) após o Undo
-                    if (cr.cpMin != cr.cpMax)
+                    size_t i;
+
+                    for (i = 0; i < g_documents.size(); ++i)
                     {
-                        // Colapsa a seleção para o início dela (onde o cursor deveria estar)
-                        SendMessageW(g_hWndEdit, EM_SETSEL, cr.cpMin, cr.cpMin);
+                        Document* pUndoDoc = g_documents[i];
+
+                        if (!pUndoDoc->bReplaceAllPending)
+                            continue;
+
+                        pUndoDoc->bReplaceAllPending = FALSE;
+                        SendMessageW(pUndoDoc->hEdit, EM_UNDO, 0, 0);
+                        CollapseSelectionAfterUndo(pUndoDoc->hEdit);
+                        EditorRestartUniversalHighlight(pUndoDoc, FALSE);
+                        EditorUpdateCurrentLineHighlight(pUndoDoc->hEdit);
+                        DocUpdateTabTitle(pUndoDoc);
                     }
                 }
-                
-                // Força o cursor a redesenhar no formato correto imediatamente
+                else
+                {
+                    SendMessageW(g_hWndEdit, EM_UNDO, 0, 0);
+                    CollapseSelectionAfterUndo(g_hWndEdit);
+                }
+
+                // Forca o cursor a redesenhar no formato correto imediatamente
                 EditorUpdateCaretShape(g_hWndEdit);
+
+                // Undo pode alterar varias linhas de uma vez; o estado de
+                // edicao so cobre o paragrafo atual, entao refaz o viewport.
+                if (pDoc != NULL)
+                {
+                    EditorRestartUniversalHighlight(pDoc, FALSE);
+                    EditorProcessViewportHighlight();
+                }
             }
             UpdateWindowTitle();
             UpdateStatusBar();
+            UpdateEditMenuState(g_hWndMain);
             return 0;
 
         case IDM_CUT:
@@ -2590,6 +2655,10 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             FindNext();
             return 0;
 
+        case IDM_FINDPREV:
+            FindPrevious();
+            return 0;
+
         case IDM_REPLACE:
             FindTextDialog(TRUE);
             return 0;
@@ -2608,6 +2677,18 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         case IDM_WORDWRAP:
             ToggleWordWrap();
+            return 0;
+
+        case IDM_ZOOM_IN:
+            EditorZoom(1);
+            return 0;
+
+        case IDM_ZOOM_OUT:
+            EditorZoom(-1);
+            return 0;
+
+        case IDM_ZOOM_RESET:
+            EditorZoomReset();
             return 0;
 
         case IDM_FONT:

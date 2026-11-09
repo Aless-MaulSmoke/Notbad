@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.6"
+#define NOTBAD_VERSION     L"1.0.7"
 #define NOTBAD_HELP_URL    L"https://aless-maulsmoke.github.io/Notbad/"
 #define NOTBAD_VERSION_URL L"https://aless-maulsmoke.github.io/Notbad/version.html"
 #define NOTBAD_RELEASES_URL L"https://github.com/Aless-MaulSmoke/Notbad/releases"
@@ -86,14 +86,19 @@ struct Document
     int          fgPrevTextLen;   // tamanho do texto na ultima atualizacao (-1 = desconhecido)
     BOOL         bReinterpreted; // encoding trocado por "reinterpretar"; limpo ao salvar/abrir
     BOOL         bOverwrite;     // modo Overwrite (tecla Insert), por documento
+    BOOL         bReplaceAllPending; // ultima acao foi um Replace All em todas as abas
+    // Realce de codigo com dois estados independentes:
+    //  - edicao: so o paragrafo atual (e o anterior) e refeito, na hora;
+    //  - viewport: o bloco visivel e refeito pelo timer quando a tela muda.
     int          codeHighlightViewStart;   // inicio do ultimo trecho visivel processado
     int          codeHighlightViewEnd;     // fim do ultimo trecho visivel processado
+    int          codeHighlightViewFirstLine; // primeira linha visivel na ultima atualizacao
     BOOL         bCodeHighlightViewValid;  // o trecho acima ainda reflete a tela atual
     BOOL         bCodeHighlightNeedsClean; // pode haver realce antigo fora da tela
     int          codeHighlightParaStart; // inicio do ultimo trecho realcado na linha atual
     int          codeHighlightParaEnd;   // fim do ultimo trecho realcado na linha atual
     BOOL         bCodeHighlightParaValid; // o trecho acima ainda reflete o texto atual
-    BOOL         bCodeHighlightTextDirty; // houve edicao desde o ultimo realce da linha atual
+    BOOL         bCodeHighlightParaDirty; // houve edicao desde o ultimo realce da linha atual
     BOOL         bCodeHighlightSynced;    // estado do realce deste documento reflete g_settings.codeHighlighting
     int          indentBlockFirst;     // primeiro paragrafo (1-based) do bloco de indentacao atual
     int          indentBlockLast;      // ultimo paragrafo (1-based) do bloco de indentacao atual
@@ -187,8 +192,11 @@ BOOL EditorIsModified(void);
 void EditorSetFont(HFONT hFont);
 void EditorSyncZoomFrom(HWND hSource);
 void EditorApplyGlobalZoomTo(HWND hEdit);
+void EditorZoom(int direction);
+void EditorZoomReset(void);
 void EditorApplyWordWrap(BOOL bWrap);
 void EditorApplyWordWrapTo(HWND hEdit, BOOL bWrap);
+void EditorUpdateHorizontalScrollBar(HWND hEdit);
 int  EditorGetParagraphNumber(HWND hEdit, int charIndex);
 int  EditorGetParagraphStart(HWND hEdit, int charIndex);
 int  EditorGetParagraphCount(HWND hEdit);
@@ -244,6 +252,7 @@ BOOL SettingsLoadTree(std::wstring& root, BOOL* pbVisible,
 // findreplace.cpp
 void FindTextDialog(BOOL bReplace);
 void FindNext(void);
+void FindPrevious(void);
 
 // dialogs.cpp
 void ShowAboutDialog(HWND hWnd);

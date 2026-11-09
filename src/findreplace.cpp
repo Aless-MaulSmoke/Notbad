@@ -190,7 +190,9 @@ static void SelectFound(Document* pDoc, int found, int cchFind)
         SetFocus(g_hFindDialog);
 }
 
-static void DoFind(BOOL bFromDialog)
+// direction: 0 = usa a direcao escolhida no dialogo; > 0 = para baixo;
+// < 0 = para cima (Find Previous ignora o radio do dialogo).
+static void DoFindEx(BOOL bFromDialog, int direction)
 {
     CHARRANGE cr;
     Document* pFoundDoc = NULL;
@@ -199,6 +201,7 @@ static void DoFind(BOOL bFromDialog)
     int startIndex;
     int count;
     int n;
+    BOOL bDown = (direction == 0) ? g_bSearchDown : (direction > 0);
 
     if (g_hFindDialog != NULL)
         ReadControls(g_hFindDialog);
@@ -225,7 +228,7 @@ static void DoFind(BOOL bFromDialog)
         int start;
         int found;
 
-        index = g_bSearchDown
+        index = bDown
               ? (startIndex + n) % count
               : (startIndex - n + count) % count;
         pDoc = g_documents[index];
@@ -237,11 +240,11 @@ static void DoFind(BOOL bFromDialog)
         if (n == 0)
         {
             SendMessageW(pDoc->hEdit, EM_EXGETSEL, 0, (LPARAM)&cr);
-            start = g_bSearchDown ? cr.cpMax : cr.cpMin;
+            start = bDown ? cr.cpMax : cr.cpMin;
         }
         else
         {
-            start = g_bSearchDown ? 0 : cchText;
+            start = bDown ? 0 : cchText;
         }
 
         if (start > cchText)
@@ -249,14 +252,14 @@ static void DoFind(BOOL bFromDialog)
 
         // Para cima, a busca comeca um caractere antes do inicio da selecao
         // (senao o resultado atual seria encontrado de novo).
-        if (n == 0 && !g_bSearchDown)
+        if (n == 0 && !bDown)
             --start;
 
         if (start < 0)
             found = -1;
         else
             found = FindInBuffer(lpText, cchText, g_szFind, start,
-                                 g_bSearchDown, g_bMatchCase, g_bWholeWord);
+                                 bDown, g_bMatchCase, g_bWholeWord);
         LocalFree(lpText);
 
         if (found >= 0)
@@ -277,9 +280,9 @@ static void DoFind(BOOL bFromDialog)
         lpText = GetDocumentText(g_pActiveDoc, &cchText);
         if (lpText != NULL)
         {
-            start = g_bSearchDown ? 0 : cchText;
+            start = bDown ? 0 : cchText;
             found = FindInBuffer(lpText, cchText, g_szFind, start,
-                                 g_bSearchDown, g_bMatchCase, g_bWholeWord);
+                                 bDown, g_bMatchCase, g_bWholeWord);
             LocalFree(lpText);
 
             if (found >= 0)
@@ -299,6 +302,11 @@ static void DoFind(BOOL bFromDialog)
     {
         ReportNotFound();
     }
+}
+
+static void DoFind(BOOL bFromDialog)
+{
+    DoFindEx(bFromDialog, 0);
 }
 
 static void DoReplace(void)
@@ -356,9 +364,15 @@ static int ReplaceAllInDocument(Document* pDoc)
     int cchFind = lstrlenW(g_szFind);
     int cchReplace = lstrlenW(g_szReplace);
     int cchText = 0;
-    int start = 0;
+    int searchFrom = 0;
+    int firstFound = -1;
+    int lastEnd = 0;
+    int pos = 0;
+    int cchNew;
     int count = 0;
     LPWSTR lpText;
+    std::wstring block;
+    CHARRANGE crOld = {};
 
     if (pDoc == NULL || cchFind == 0)
         return 0;
@@ -367,45 +381,65 @@ static int ReplaceAllInDocument(Document* pDoc)
     if (lpText == NULL)
         return 0;
 
-    SendMessageW(pDoc->hEdit, WM_SETREDRAW, FALSE, 0);
-
     for (;;)
     {
-        int found = FindInBuffer(lpText, cchText, g_szFind, start,
+        int found = FindInBuffer(lpText, cchText, g_szFind, searchFrom,
                                  TRUE, g_bMatchCase, g_bWholeWord);
-        CHARRANGE cr;
 
         if (found < 0)
             break;
 
-        cr.cpMin = found;
-        cr.cpMax = found + cchFind;
-        SendMessageW(pDoc->hEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
-        SendMessageW(pDoc->hEdit, EM_REPLACESEL, FALSE, (LPARAM)g_szReplace);
+        if (firstFound < 0)
+        {
+            firstFound = found;
+            pos = found;
+        }
+
+        block.append(lpText + pos, (size_t)(found - pos));
+        block.append(g_szReplace, (size_t)cchReplace);
+        pos = found + cchFind;
+        searchFrom = pos;
+        lastEnd = pos;
         ++count;
-
-        LocalFree(lpText);
-        lpText = GetDocumentText(pDoc, &cchText);
-        if (lpText == NULL)
-            break;
-
-        start = found + cchReplace;
     }
 
-    if (lpText != NULL)
-        LocalFree(lpText);
+    LocalFree(lpText);
 
+    if (count == 0)
+        return 0;
+
+    SendMessageW(pDoc->hEdit, EM_EXGETSEL, 0, (LPARAM)&crOld);
+
+    SendMessageW(pDoc->hEdit, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(pDoc->hEdit, EM_SETSEL, firstFound, lastEnd);
+    SendMessageW(pDoc->hEdit, EM_REPLACESEL, TRUE, (LPARAM)block.c_str());
     SendMessageW(pDoc->hEdit, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(pDoc->hEdit, NULL, TRUE);
 
-    if (count > 0)
+    cchNew = cchText - (lastEnd - firstFound) + (int)block.size();
+    if (crOld.cpMin > cchNew)
+        crOld.cpMin = cchNew;
+    if (crOld.cpMax > cchNew)
+        crOld.cpMax = cchNew;
+    if (crOld.cpMin < 0)
+        crOld.cpMin = 0;
+    if (crOld.cpMax < crOld.cpMin)
+        crOld.cpMax = crOld.cpMin;
+    SendMessageW(pDoc->hEdit, EM_EXSETSEL, 0, (LPARAM)&crOld);
+
+    // Um Replace All em todas as abas e uma unica acao para o usuario: o Undo
+    // desfaz a substituicao em cada aba marcada.
+    pDoc->bReplaceAllPending = TRUE;
+
+    EditorRestartUniversalHighlight(pDoc, FALSE);
+
+    DocUpdateTabTitle(pDoc);
+    if (pDoc == g_pActiveDoc)
     {
-        DocUpdateTabTitle(pDoc);
-        if (pDoc == g_pActiveDoc)
-        {
-            UpdateWindowTitle();
-            UpdateStatusBar();
-        }
+        EditorUpdateCurrentLineHighlight(pDoc->hEdit);
+        EditorProcessViewportHighlight();
+        UpdateWindowTitle();
+        UpdateStatusBar();
     }
 
     return count;
@@ -423,6 +457,10 @@ static void DoReplaceAll(void)
 
     if (g_szFind[0] == L'\0')
         return;
+
+    // Uma nova operacao invalida o agrupamento de Undo de um Replace All antigo.
+    for (i = 0; i < g_documents.size(); ++i)
+        g_documents[i]->bReplaceAllPending = FALSE;
 
     if (g_bAllFiles)
     {
@@ -547,4 +585,18 @@ void FindNext(void)
     }
 
     DoFind(TRUE);
+}
+
+void FindPrevious(void)
+{
+    if (g_hFindDialog != NULL)
+        ReadControls(g_hFindDialog);
+
+    if (g_szFind[0] == L'\0')
+    {
+        FindTextDialog(FALSE);
+        return;
+    }
+
+    DoFindEx(TRUE, -1);
 }

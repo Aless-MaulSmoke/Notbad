@@ -84,9 +84,11 @@ static const LangIdEntry s_menuItems[] =
     NB_IDS(IDM_EXIT),
     NB_IDS(IDM_UNDO),           NB_IDS(IDM_CUT),            NB_IDS(IDM_COPY),
     NB_IDS(IDM_PASTE),          NB_IDS(IDM_DELETE),         NB_IDS(IDM_FIND),
-    NB_IDS(IDM_FINDNEXT),       NB_IDS(IDM_REPLACE),        NB_IDS(IDM_GOTO),
+    NB_IDS(IDM_FINDNEXT),       NB_IDS(IDM_FINDPREV),       NB_IDS(IDM_REPLACE),
+    NB_IDS(IDM_GOTO),
     NB_IDS(IDM_SELECTALL),      NB_IDS(IDM_TIMEDATE),
     NB_IDS(IDM_WORDWRAP),       NB_IDS(IDM_FONT),           NB_IDS(IDM_INDENT),
+    NB_IDS(IDM_ZOOM_IN),        NB_IDS(IDM_ZOOM_OUT),       NB_IDS(IDM_ZOOM_RESET),
     NB_IDS(IDM_ENC_ANSI),       NB_IDS(IDM_ENC_UTF8),       NB_IDS(IDM_ENC_UTF8BOM),
     NB_IDS(IDM_ENC_UTF16LE),
     NB_IDS(IDM_NEXT_TAB),       NB_IDS(IDM_PREV_TAB),       NB_IDS(IDM_TREE),
@@ -104,6 +106,7 @@ static const LangIdEntry s_menuPopups[] =
     { IDM_WORDWRAP, L"IDM_POPUP_FORMAT" },
     { IDM_ENC_ANSI, L"IDM_POPUP_ENCODING" },
     { IDM_NEXT_TAB, L"IDM_POPUP_VIEW" },
+    { IDM_ZOOM_IN,  L"IDM_POPUP_ZOOM" },
     { IDM_HELP,     L"IDM_POPUP_HELP" }
 };
 

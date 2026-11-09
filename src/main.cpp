@@ -92,6 +92,70 @@ static BOOL ParseRemoteVersion(const char* pData, DWORD cbData,
     return n > 0;
 }
 
+// Quebra "major.minor.patch..." em componentes inteiros, ignorando qualquer
+// separador nao numerico ('.', '-', espaco etc.). Ler cada componente como
+// inteiro evita os erros de tratar a versao como um numero decimal unico
+// ("1.0.10" continua maior que "1.0.9").
+#define VERSION_MAX_PARTS 8
+
+static int ParseVersionParts(const WCHAR* lpVersion, int* parts, int maxParts)
+{
+    int count = 0;
+    int i = 0;
+
+    if (lpVersion == NULL || parts == NULL)
+        return 0;
+
+    while (lpVersion[i] != L'\0' && count < maxParts)
+    {
+        int value = 0;
+
+        while (lpVersion[i] != L'\0' &&
+               (lpVersion[i] < L'0' || lpVersion[i] > L'9'))
+        {
+            ++i;
+        }
+        if (lpVersion[i] == L'\0')
+            break;
+
+        while (lpVersion[i] >= L'0' && lpVersion[i] <= L'9')
+        {
+            if (value < 100000000)
+                value = value * 10 + (lpVersion[i] - L'0');
+            ++i;
+        }
+
+        parts[count++] = value;
+    }
+
+    return count;
+}
+
+// Compara duas versoes componente a componente. Os componentes iguais a
+// esquerda sao ignorados (1 == 1); o primeiro diferente decide (0 == 0,
+// 7 > 6). "1.0" e "1.0.0" sao equivalentes. Retorna >0 se lpA for mais nova,
+// <0 se lpB for mais nova e 0 se forem iguais.
+static int CompareVersions(const WCHAR* lpA, const WCHAR* lpB)
+{
+    int partsA[VERSION_MAX_PARTS] = {};
+    int partsB[VERSION_MAX_PARTS] = {};
+    int countA = ParseVersionParts(lpA, partsA, VERSION_MAX_PARTS);
+    int countB = ParseVersionParts(lpB, partsB, VERSION_MAX_PARTS);
+    int count = (countA > countB) ? countA : countB;
+    int k;
+
+    for (k = 0; k < count; ++k)
+    {
+        int valueA = (k < countA) ? partsA[k] : 0;
+        int valueB = (k < countB) ? partsB[k] : 0;
+
+        if (valueA != valueB)
+            return (valueA > valueB) ? 1 : -1;
+    }
+
+    return 0;
+}
+
 static DWORD WINAPI VersionCheckThread(LPVOID lpParam)
 {
     HWND hWnd = (HWND)lpParam;
@@ -136,7 +200,7 @@ static DWORD WINAPI VersionCheckThread(LPVOID lpParam)
     InternetCloseHandle(hSession);
 
     if (ParseRemoteVersion(szData, cbTotal, szRemote, ARRAYSIZE(szRemote)) &&
-        lstrcmpW(szRemote, NOTBAD_VERSION) != 0)
+        CompareVersions(szRemote, NOTBAD_VERSION) > 0)
     {
         size_t cchCopy = (size_t)lstrlenW(szRemote) + 1;
         LPWSTR lpCopy = (LPWSTR)LocalAlloc(LMEM_FIXED, cchCopy * sizeof(WCHAR));

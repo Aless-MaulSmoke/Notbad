@@ -77,9 +77,15 @@
 #define IDM_GOTO                    0x1018
 #define IDM_SELECTALL               0x1019
 #define IDM_TIMEDATE                0x101A
+#define IDM_FINDPREV                0x101B
+#define IDM_FOCUS_TREE              0x101C
+#define IDM_FOCUS_EDIT              0x101D
 
 #define IDM_WORDWRAP                0x1020
 #define IDM_FONT                    0x1021
+#define IDM_ZOOM_IN                 0x1022
+#define IDM_ZOOM_OUT                0x1023
+#define IDM_ZOOM_RESET              0x1024
 
 #define IDM_STATUS                  0x1030
 #define IDM_NEXT_TAB                0x1031

@@ -160,7 +160,7 @@ th{background:var(--win);font-weight:600}
       <section id="tabs">
         <h2>Tabs and documents</h2>
         <ul>
-          <li><strong>Multiple documents.</strong> Work with many files in one window. Drag a tab to reorder it.</li>
+          <li><strong>Multiple documents.</strong> Work with many files in one window. Drag a tab to reorder it. Press <kbd>Ctrl</kbd>+<kbd>N</kbd> to open new tab.</li>
           <li><strong>Unsaved changes.</strong> A <code>*</code> before the file name marks a tab with unsaved changes.</li>
           <li><strong>Save All.</strong> Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> to save every open file.</li>
           <li><strong>Close tab.</strong> Press <kbd>Ctrl</kbd>+<kbd>F4</kbd>.</li>
@@ -173,6 +173,9 @@ th{background:var(--win);font-weight:600}
         <h2>File tree</h2>
         <p>Open a folder with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> to show a side panel with the folder’s files and subfolders. The tree uses the system’s native icons.</p>
         <p>Show or hide the panel with <kbd>Ctrl</kbd>+<kbd>T</kbd>. Dragging a folder into Notbad opens the tree at that folder.</p>
+        <p>You can drag and drop a folder into Notbad and it will open in the file tree.</p>
+        <p>You can drag and drop a folder into Notbad and it will open in the file tree.</p>
+        <p>It's possible to switch between the file tree and the editing area by pressing, respectively: <kbd>Ctrl</kbd>+<kbd>1</kbd> e <kbd>Ctrl</kbd>+<kbd>2</kbd></p>
       </section>
 
       <section id="lines">
@@ -180,7 +183,7 @@ th{background:var(--win);font-weight:600}
         <p>Toggle the gutter with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>.</p>
         <ul>
           <li><strong>Logical lines.</strong> A long line that wraps across several rows keeps a single number, so the count always matches the real lines of the document.</li>
-          <li><strong>Block highlighting.</strong> The gutter also highlights the indented block that contains the cursor.</li>
+          <li><strong>Block highlighting.</strong> The gutter also highlights the indented block that contains the cursor. Indentation mode must be on. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></li>
           <li><strong>Scrolling and zoom.</strong> Numbers follow vertical scrolling smoothly and stay centered on their line when you zoom with Word Wrap on.</li>
         </ul>
         <p>Use <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> (View &rarr; Highlight Current Line) to tint the line under the cursor in light gray.</p>
@@ -252,18 +255,24 @@ th{background:var(--win);font-weight:600}
         <table>
           <tr><th>Shortcut</th><th>Action</th></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></td><td>Save all open files</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New tab</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>Move the focus to next tab</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Move the focus to previous tab</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>F4</kbd></td><td>Close the current tab</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open a folder in the file tree</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Show or hide the file tree</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd></td><td>Move the focus to the file tree when it’s visible</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>Move the focus to the edit area</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Show or hide line numbers</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Highlight the current line</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>Toggle code highlighting</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Turn auto-indent on or off</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Toggle Word Wrap</td></tr>
-          <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Indent / unindent the selected block</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Indent the selected block</td></tr>
+          <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Unindent the selected block</td></tr>
           <tr><td><kbd>Shift</kbd>+<kbd>Delete</kbd></td><td>Cut</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Insert</kbd></td><td>Copy</td></tr>
           <tr><td><kbd>Shift</kbd>+<kbd>Insert</kbd></td><td>Paste</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Insert</kbd></td><td>Copy</td></tr>
         </table>
         </div>
       </section>

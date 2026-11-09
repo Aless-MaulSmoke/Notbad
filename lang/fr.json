@@ -107,5 +107,12 @@
   "IDS_REPLACED_COUNT": "%d occurrence(s) remplacée(s).",
   "IDS_STATUS_AUTOINDENT": "Retrait auto",
   "IDS_ENC_UTF8BOM": "UTF-8 avec BOM",
-  "IDS_NEW_VERSION": "Une nouvelle version de Notbad est disponible : %s\n\nVous utilisez la version %s.\n\nVoulez-vous ouvrir la page de téléchargement ?"
+  "IDS_NEW_VERSION": "Une nouvelle version de Notbad est disponible : %s\n\nVous utilisez la version %s.\n\nVoulez-vous ouvrir la page de téléchargement ?",
+  "IDS_TREE_RECYCLE": "Déplacer \"%s\" vers la Corbeille ?",
+  "IDS_TREE_UNDO_RENAME": "Annuler le renommage de \"%s\" en \"%s\" ?",
+  "IDS_TREE_UNDO_MOVE": "Annuler le déplacement de \"%s\" vers \"%s\" ?",
+  "IDS_TREE_UNDO_COPY": "Annuler la copie créée dans \"%s\" ?",
+  "IDS_TREE_UNDO_CREATE": "Annuler la création de \"%s\" ?",
+  "IDS_TREE_UNDO_DELETE": "Restaurer \"%s\" depuis la Corbeille ?",
+  "IDS_TREE_UNDO_FAILED": "Impossible d'annuler l'opération."
 }

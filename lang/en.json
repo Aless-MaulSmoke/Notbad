@@ -107,5 +107,12 @@
   "IDS_REPLACED_COUNT": "Replaced %d occurrence(s).",
   "IDS_STATUS_AUTOINDENT": "Auto-indent",
   "IDS_ENC_UTF8BOM": "UTF-8 with BOM",
-  "IDS_NEW_VERSION": "A new version of Notbad is available: %s\n\nYou are using version %s.\n\nOpen the download page?"
+  "IDS_NEW_VERSION": "A new version of Notbad is available: %s\n\nYou are using version %s.\n\nOpen the download page?",
+  "IDS_TREE_RECYCLE": "Move \"%s\" to the Recycle Bin?",
+  "IDS_TREE_UNDO_RENAME": "Undo the rename of \"%s\" to \"%s\"?",
+  "IDS_TREE_UNDO_MOVE": "Undo moving \"%s\" to \"%s\"?",
+  "IDS_TREE_UNDO_COPY": "Undo the copy created in \"%s\"?",
+  "IDS_TREE_UNDO_CREATE": "Undo the creation of \"%s\"?",
+  "IDS_TREE_UNDO_DELETE": "Restore \"%s\" from the Recycle Bin?",
+  "IDS_TREE_UNDO_FAILED": "The operation could not be undone."
 }

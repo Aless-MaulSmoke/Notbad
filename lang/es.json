@@ -107,5 +107,12 @@
   "IDS_REPLACED_COUNT": "%d ocurrencia(s) reemplazada(s).",
   "IDS_STATUS_AUTOINDENT": "Sangría auto.",
   "IDS_ENC_UTF8BOM": "UTF-8 con BOM",
-  "IDS_NEW_VERSION": "Una nueva versión de Notbad está disponible: %s\n\nEstá usando la versión %s.\n\n¿Desea abrir la página de descarga?"
+  "IDS_NEW_VERSION": "Una nueva versión de Notbad está disponible: %s\n\nEstá usando la versión %s.\n\n¿Desea abrir la página de descarga?",
+  "IDS_TREE_RECYCLE": "¿Mover \"%s\" a la Papelera de reciclaje?",
+  "IDS_TREE_UNDO_RENAME": "¿Deshacer el cambio de nombre de \"%s\" a \"%s\"?",
+  "IDS_TREE_UNDO_MOVE": "¿Deshacer el movimiento de \"%s\" a \"%s\"?",
+  "IDS_TREE_UNDO_COPY": "¿Deshacer la copia creada en \"%s\"?",
+  "IDS_TREE_UNDO_CREATE": "¿Deshacer la creación de \"%s\"?",
+  "IDS_TREE_UNDO_DELETE": "¿Restaurar \"%s\" de la Papelera de reciclaje?",
+  "IDS_TREE_UNDO_FAILED": "No se pudo deshacer la operación."
 }

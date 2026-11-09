@@ -107,5 +107,12 @@
   "IDS_REPLACED_COUNT": "%d ocorrência(s) substituída(s).",
   "IDS_STATUS_AUTOINDENT": "Indent. auto",
   "IDS_ENC_UTF8BOM": "UTF-8 com BOM",
-  "IDS_NEW_VERSION": "Uma nova versão do Notbad está disponível: %s\n\nVocê está usando a versão %s.\n\nDeseja abrir a página de download?"
+  "IDS_NEW_VERSION": "Uma nova versão do Notbad está disponível: %s\n\nVocê está usando a versão %s.\n\nDeseja abrir a página de download?",
+  "IDS_TREE_RECYCLE": "Mover \"%s\" para a Lixeira?",
+  "IDS_TREE_UNDO_RENAME": "Desfazer a renomeação de \"%s\" para \"%s\"?",
+  "IDS_TREE_UNDO_MOVE": "Desfazer a movimentação de \"%s\" para \"%s\"?",
+  "IDS_TREE_UNDO_COPY": "Desfazer a cópia criada em \"%s\"?",
+  "IDS_TREE_UNDO_CREATE": "Desfazer a criação de \"%s\"?",
+  "IDS_TREE_UNDO_DELETE": "Restaurar \"%s\" da Lixeira?",
+  "IDS_TREE_UNDO_FAILED": "Não foi possível desfazer a operação."
 }

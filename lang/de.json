@@ -107,5 +107,12 @@
   "IDS_REPLACED_COUNT": "%d Vorkommen ersetzt.",
   "IDS_STATUS_AUTOINDENT": "Auto-Einzug",
   "IDS_ENC_UTF8BOM": "UTF-8 mit BOM",
-  "IDS_NEW_VERSION": "Eine neue Version von Notbad ist verfügbar: %s\n\nSie verwenden Version %s.\n\nMöchten Sie die Download-Seite öffnen?"
+  "IDS_NEW_VERSION": "Eine neue Version von Notbad ist verfügbar: %s\n\nSie verwenden Version %s.\n\nMöchten Sie die Download-Seite öffnen?",
+  "IDS_TREE_RECYCLE": "\"%s\" in den Papierkorb verschieben?",
+  "IDS_TREE_UNDO_RENAME": "Umbenennung von \"%s\" in \"%s\" rückgängig machen?",
+  "IDS_TREE_UNDO_MOVE": "Verschieben von \"%s\" nach \"%s\" rückgängig machen?",
+  "IDS_TREE_UNDO_COPY": "Erstellte Kopie \"%s\" rückgängig machen?",
+  "IDS_TREE_UNDO_CREATE": "Erstellung von \"%s\" rückgängig machen?",
+  "IDS_TREE_UNDO_DELETE": "\"%s\" aus dem Papierkorb wiederherstellen?",
+  "IDS_TREE_UNDO_FAILED": "Der Vorgang konnte nicht rückgängig gemacht werden."
 }

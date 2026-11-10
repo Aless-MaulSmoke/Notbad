@@ -55,6 +55,10 @@ The project adheres to strict rules of the classic interface (Editing Window, Me
 ### 🔍 Advanced Modeless Search
 * **Global Scope:** A custom Find/Replace dialog that allows for refined searches and batch replacements scanning **all open files** simultaneously.
 
+### 🌐 Help & Updates
+* **Project Website:** Help > View Help opens the online project page in the default browser.
+* **Version Check:** On startup, Notbad quietly checks the published version and offers the releases page when a different version is available.
+
 ---
 
 ## 👥 Credits and Project Team

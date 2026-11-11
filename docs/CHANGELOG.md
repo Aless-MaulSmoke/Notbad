@@ -2,7 +2,7 @@
 
 ## v1.0.91 - 11/11/2026
 
-### FIXES
+### HOTFIX
 
 #### Editing
 * **Stuck Highlight on Empty Lines:** With Highlight Current Line enabled, moving the cursor with the keyboard no longer leaves previously visited empty lines permanently highlighted after the cursor has moved away.

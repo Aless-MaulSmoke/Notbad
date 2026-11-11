@@ -140,3 +140,4 @@
 #define IDS_TREE_UNDO_CREATE        0x201D
 #define IDS_TREE_UNDO_DELETE        0x201E
 #define IDS_TREE_UNDO_FAILED        0x201F
+#define IDS_TREE_NEWFOLDER          0x2020

@@ -1337,57 +1337,93 @@ static BOOL GetCaretMetrics(HWND hEdit, int caret, BOOL bOverwrite,
 
 // Aplica a forma do caret conforme o modo do documento. Chamado quando a
 // selecao ou o texto mudam, no foco e depois de a tecla Insert alternar o modo.
-// No modo Insert so age se antes houve um caret em bloco a desfazer.
-// Realce da linha atual por retangulo desenhado DEPOIS do WM_PAINT do
-// RichEdit, usado quando a linha do caret esta vazia no fim do texto (ex.:
-// documento novo ou ultima linha vazia): nao ha caractere para o caminho
-// normal de formatacao pintar. Nao ha cache nem invalidacao — o RichEdit
-// repinta o fundo da area a cada WM_PAINT e aqui so desenhamos se for caso.
-void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
+// TRUE quando a linha do caret (com caret colapsado) so contem caracteres
+// de fim de linha e espacos/tabs — isto e, visualmente e uma linha vazia
+// (inclui a ultima linha, virtual).
+static BOOL EditorLineAtCaretIsBlank(HWND hEdit)
 {
+    TEXTRANGEW tr = {};
+    WCHAR szBuf[32];
     GETTEXTLENGTHEX gtl = {};
+    int textLen;
     int selStart;
     int selEnd;
-    int caret;
+    int para;
+    int start;
+    int end;
+    int got;
+    int i;
+
+    if (hEdit == NULL)
+        return FALSE;
+
+    GetEditSelection(hEdit, &selStart, &selEnd);
+    if (selEnd != selStart)
+        return FALSE;
+
+    gtl.flags = GTL_DEFAULT | GTL_NUMCHARS;
+    gtl.codepage = 1200;
+    textLen = (int)SendMessageW(hEdit, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+    if (textLen < 0)
+        textLen = 0;
+
+    para = EditorGetParagraphNumber(hEdit, selEnd);
+    start = EditorGetParagraphStart(hEdit, selEnd);
+    end = EditorGetParagraphStartByNumber(hEdit, para + 1);
+
+    if (end <= start)
+        // paragrafo virtual no fim do texto (GetParagraphStartByNumber
+        // devolve 0 para alem da ultima linha)
+        return TRUE;
+
+    if (end - start > (int)ARRAYSIZE(szBuf) - 1)
+        return FALSE;
+
+    tr.chrg.cpMin = start;
+    tr.chrg.cpMax = end;
+    tr.lpstrText = szBuf;
+
+    got = (int)SendMessageW(hEdit, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    if (got <= 0)
+        return FALSE;
+
+    for (i = 0; i < got; ++i)
+    {
+        if (szBuf[i] != L'\r' && szBuf[i] != L'\n' &&
+            szBuf[i] != L' ' && szBuf[i] != L'\t')
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+// Retangulo da linha do caret quando ela esta vazia; FALSE caso contrario.
+static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
+{
     int zoomNum = 1;
     int zoomDen = 1;
     POINT pt = {};
     RECT rcView = {};
     RECT rcClient = {};
-    RECT rc = {};
     HDC hdc = NULL;
     HGDIOBJ oldFont = NULL;
     TEXTMETRICW tm = {};
-    static HBRUSH s_brushHighlight = NULL;
-    int para;
-    int start;
-    int nextStart;
     int lineHeight;
 
-    if (!g_settings.highlightCurrentLine)
-        return;
-    if (hEdit == NULL || pDoc == NULL)
-        return;
-    if (pDoc != g_pActiveDoc)
-        return;
+    if (prc == NULL || hEdit == NULL)
+        return FALSE;
+    if (!EditorLineAtCaretIsBlank(hEdit))
+        return FALSE;
 
-    GetEditSelection(hEdit, &selStart, &selEnd);
-    if (selEnd != selStart)
-        return;
-    caret = selEnd;
+    {
+        int selStart = 0;
+        int selEnd = 0;
 
-    para = EditorGetParagraphNumber(hEdit, caret);
-    start = EditorGetParagraphStart(hEdit, caret);
-    nextStart = EditorGetParagraphStartByNumber(hEdit, para + 1);
+        GetEditSelection(hEdit, &selStart, &selEnd);
+        SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, selEnd);
+    }
 
-    // Se a proxima linha comeca depois do inicio desta, a linha do caret nao
-    // esta vazia — o caminho normal de formatacao cobre o realce.
-    if (nextStart > start)
-        return;
-
-    SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, caret);
-
-    // Altura da linha com o mesmo calculo do caret de bloco.
+    // Mesmo calculo de altura do caret de bloco.
     SendMessageW(hEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
     if (zoomNum <= 0 || zoomDen <= 0)
     {
@@ -1397,9 +1433,9 @@ void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
 
     hdc = GetDC(hEdit);
     if (hdc == NULL)
-        return;
+        return FALSE;
     oldFont = SelectObject(hdc, g_hFont != NULL ? (HGDIOBJ)g_hFont
-                                                 : GetStockObject(SYSTEM_FIXED_FONT));
+                                                  : GetStockObject(SYSTEM_FIXED_FONT));
     GetTextMetricsW(hdc, &tm);
     SelectObject(hdc, oldFont);
     ReleaseDC(hEdit, hdc);
@@ -1412,18 +1448,45 @@ void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
     GetClientRect(hEdit, &rcClient);
 
     if (rcView.left >= rcView.right || rcView.top >= rcView.bottom)
-        return;
+        return FALSE;
     if (pt.y >= rcView.bottom || pt.y + lineHeight <= rcView.top)
+        return FALSE;
+
+    prc->left = rcView.left;
+    prc->right = rcView.right;
+    prc->top = pt.y;
+    prc->bottom = pt.y + lineHeight;
+    if (prc->bottom > rcView.bottom)
+        prc->bottom = rcView.bottom;
+    if (prc->top < rcView.top)
+        prc->top = rcView.top;
+
+    return TRUE;
+}
+
+// Aplica a forma do caret conforme o modo do documento. Chamado quando a
+// selecao ou o texto mudam, no foco e depois de a tecla Insert alternar o modo.
+// No modo Insert so age se antes houve um caret em bloco a desfazer.
+// Realce da linha atual por retangulo desenhado DEPOIS do WM_PAINT do
+// RichEdit, usado quando a linha do caret nao tem nenhum caractere alem do
+// fim de linha (ex.: documento novo, linha criada com Enter no meio do
+// documento, ultima linha vazia): nao ha caractere para o caminho
+// normal de formatacao pintar.
+void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
+{
+    RECT rc = {};
+    HDC hdc = NULL;
+    static HBRUSH s_brushHighlight = NULL;
+
+    if (!g_settings.highlightCurrentLine)
+        return;
+    if (hEdit == NULL || pDoc == NULL)
+        return;
+    if (pDoc != g_pActiveDoc)
         return;
 
-    rc.left = rcView.left;
-    rc.right = rcView.right;
-    rc.top = pt.y;
-    rc.bottom = pt.y + lineHeight;
-    if (rc.bottom > rcView.bottom)
-        rc.bottom = rcView.bottom;
-    if (rc.top < rcView.top)
-        rc.top = rcView.top;
+    if (!EditorBlankLineRect(hEdit, &rc))
+        return;
 
     if (s_brushHighlight == NULL)
         s_brushHighlight = CreateSolidBrush(NOTBAD_HIGHLIGHT_COLOR);
@@ -1431,7 +1494,9 @@ void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
     hdc = GetDC(hEdit);
     if (hdc == NULL)
         return;
+    HideCaret(hEdit);
     FillRect(hdc, &rc, s_brushHighlight);
+    ShowCaret(hEdit);
     ReleaseDC(hEdit, hdc);
 }
 
@@ -2916,6 +2981,16 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
 
     s_bUpdatingHighlight = TRUE;
 
+    // A faixa pintada pelo realce de linha vazia nao e conhecida pelo
+    // RichEdit: invalida-la aqui faz o WM_PAINT seguinte redesenhar com o
+    // estado atual da opcao, seja ligando, desligando ou ao sair da linha.
+    {
+        RECT rcBlank = {};
+
+        if (EditorBlankLineRect(hEdit, &rcBlank))
+            InvalidateRect(hEdit, &rcBlank, FALSE);
+    }
+
     GetEditSelection(hEdit, &selStart, &selEnd);
     caret = selEnd;
     lineCaret = EditorGetActiveEnd(hEdit, selStart, selEnd);
@@ -2941,6 +3016,11 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     if (end > storyEnd)
         end = storyEnd;
     if (end < start)
+        end = start;
+
+    // Linha vazia: o retangulo (EditorPaintEmptyLineHighlight) cobre o
+    // realce; nao ha caractere para aplicar formato SES.
+    if (EditorLineAtCaretIsBlank(hEdit))
         end = start;
 
     wantLine = g_settings.highlightCurrentLine;

@@ -114,5 +114,6 @@
   "IDS_TREE_UNDO_COPY": "Erstellte Kopie \"%s\" rückgängig machen?",
   "IDS_TREE_UNDO_CREATE": "Erstellung von \"%s\" rückgängig machen?",
   "IDS_TREE_UNDO_DELETE": "\"%s\" aus dem Papierkorb wiederherstellen?",
-  "IDS_TREE_UNDO_FAILED": "Der Vorgang konnte nicht rückgängig gemacht werden."
+  "IDS_TREE_UNDO_FAILED": "Der Vorgang konnte nicht rückgängig gemacht werden.",
+  "IDS_TREE_NEWFOLDER": "Neuer Ordner"
 }

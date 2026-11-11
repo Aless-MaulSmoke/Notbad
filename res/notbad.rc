@@ -5,9 +5,10 @@ IDI_NOTBAD ICON "../images/icon-256.ico"
 IDI_NOTBAD_TITLE ICON "../images/n_icon-256.ico"
 IDB_ABOUT_LOGO BITMAP "notbad-about.bmp"
 
-// Idiomas embutidos (JSON em UTF-8). Nome: NBLANG_<TAG> com '-' trocado por '_'
-// (pt-BR -> NBLANG_PT_BR). Veja lang/en.json e tools/lang_tool.py.
-NBLANG_EN RCDATA "../lang/en.json"
+// Idiomas embutidos (JSON em UTF-8). A lista NAO e editada a mao: o
+// pre-build (tools\embed_langs.ps1) varre lang\*.json e gera lang_embedded.rc
+// com uma linha NBLANG_<TAG> RCDATA por arquivo encontrado ("pt-BR" -> NBLANG_PT_BR).
+#include "lang_embedded.rc"
 
 IDR_MAINMENU MENU
 BEGIN
@@ -154,6 +155,7 @@ BEGIN
     IDS_TREE_UNDO_CREATE "Undo the creation of ""%s""?"
     IDS_TREE_UNDO_DELETE "Restore ""%s"" from the Recycle Bin?"
     IDS_TREE_UNDO_FAILED "The operation could not be undone."
+    IDS_TREE_NEWFOLDER  "New folder"
 END
 
 IDD_ABOUT DIALOGEX 0, 0, 340, 186

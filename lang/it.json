@@ -114,5 +114,6 @@
   "IDS_TREE_UNDO_COPY": "Annulla la copia creata in \"%s\"?",
   "IDS_TREE_UNDO_CREATE": "Annulla la creazione di \"%s\"?",
   "IDS_TREE_UNDO_DELETE": "Ripristinare \"%s\" dal Cestino?",
-  "IDS_TREE_UNDO_FAILED": "Impossibile annullare l'operazione."
+  "IDS_TREE_UNDO_FAILED": "Impossibile annullare l'operazione.",
+  "IDS_TREE_NEWFOLDER": "Nuova cartella"
 }

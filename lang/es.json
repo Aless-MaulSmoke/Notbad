@@ -114,5 +114,6 @@
   "IDS_TREE_UNDO_COPY": "¿Deshacer la copia creada en \"%s\"?",
   "IDS_TREE_UNDO_CREATE": "¿Deshacer la creación de \"%s\"?",
   "IDS_TREE_UNDO_DELETE": "¿Restaurar \"%s\" de la Papelera de reciclaje?",
-  "IDS_TREE_UNDO_FAILED": "No se pudo deshacer la operación."
+  "IDS_TREE_UNDO_FAILED": "No se pudo deshacer la operación.",
+  "IDS_TREE_NEWFOLDER": "Nueva carpeta"
 }

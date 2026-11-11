@@ -114,5 +114,6 @@
   "IDS_TREE_UNDO_COPY": "Annuler la copie créée dans \"%s\" ?",
   "IDS_TREE_UNDO_CREATE": "Annuler la création de \"%s\" ?",
   "IDS_TREE_UNDO_DELETE": "Restaurer \"%s\" depuis la Corbeille ?",
-  "IDS_TREE_UNDO_FAILED": "Impossible d'annuler l'opération."
+  "IDS_TREE_UNDO_FAILED": "Impossible d'annuler l'opération.",
+  "IDS_TREE_NEWFOLDER": "Nouveau dossier"
 }

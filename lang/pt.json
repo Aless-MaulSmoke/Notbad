@@ -114,5 +114,6 @@
   "IDS_TREE_UNDO_COPY": "Desfazer a cópia criada em \"%s\"?",
   "IDS_TREE_UNDO_CREATE": "Desfazer a criação de \"%s\"?",
   "IDS_TREE_UNDO_DELETE": "Restaurar \"%s\" da Reciclagem?",
-  "IDS_TREE_UNDO_FAILED": "Não foi possível desfazer a operação."
+  "IDS_TREE_UNDO_FAILED": "Não foi possível desfazer a operação.",
+  "IDS_TREE_NEWFOLDER": "Nova pasta"
 }

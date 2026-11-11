@@ -1465,6 +1465,20 @@ static std::wstring g_treeClipboardPath;
 static BOOL g_treeCutPending = FALSE;
 static void TreeSetCutMark(LPCWSTR lpPath, BOOL bCut);
 
+// Mensagem postada pelo TVN_ENDLABELEDITW com o caminho novo (heap). A
+// reconstrucao da arvore acontece DEPOIS que a TreeView termina de processar
+// a notificacao: reconstruir dentro dela deixava a TreeView com handles de
+// itens invalidos, e ela gravava o texto novo num item errado (a pasta logo
+// acima exibia o nome do arquivo ate a proxima atualizacao).
+static UINT GetTreeRenameDoneMessage(void)
+{
+    static UINT s_msg = 0;
+
+    if (s_msg == 0)
+        s_msg = RegisterWindowMessageW(L"Notbad.TreeRenameDone");
+    return s_msg;
+}
+
 void RefreshFileTreeView(void)
 {
     RefreshFileTree();
@@ -1503,32 +1517,6 @@ static HTREEITEM FindTreeItemByPath(HTREEITEM hItem, LPCWSTR lpPath)
     }
 
     return NULL;
-}
-
-static BOOL SetTreeItemPath(HTREEITEM hItem, LPCWSTR lpPath)
-{
-    TVITEMW item = {};
-    WCHAR* pszPath;
-
-    if (g_hWndTree == NULL || hItem == NULL || lpPath == NULL)
-        return FALSE;
-
-    pszPath = new WCHAR[MAX_FILE_PATH];
-    if (pszPath == NULL)
-        return FALSE;
-
-    StringCchCopyW(pszPath, MAX_FILE_PATH, lpPath);
-
-    item.mask = TVIF_PARAM;
-    item.hItem = hItem;
-    item.lParam = (LPARAM)pszPath;
-    if (!TreeView_SetItem(g_hWndTree, &item))
-    {
-        delete[] pszPath;
-        return FALSE;
-    }
-
-    return TRUE;
 }
 
 // Separa o sufixo numerico " (n)" do final do nome base (ex.: "meu arquivo
@@ -1690,32 +1678,6 @@ static void TreeUpdateOpenDocsRenamed(LPCWSTR lpOld, LPCWSTR lpNew, BOOL bDir)
     }
 }
 
-static void TreeUpdateItemPathPrefix(HTREEITEM hItem, LPCWSTR lpOldPrefix, LPCWSTR lpNewPrefix)
-{
-    size_t oldLen = lstrlenW(lpOldPrefix);
-    size_t newLen = lstrlenW(lpNewPrefix);
-
-    while (hItem != NULL)
-    {
-        WCHAR* pszPath = GetTreeItemPath(hItem);
-
-        if (pszPath != NULL && _wcsnicmp(pszPath, lpOldPrefix, oldLen) == 0 &&
-            (pszPath[oldLen] == L'\0' || pszPath[oldLen] == L'\\'))
-        {
-            WCHAR szNew[MAX_FILE_PATH] = {};
-
-            StringCchCopyW(szNew, ARRAYSIZE(szNew), lpNewPrefix);
-            StringCchCatW(szNew, ARRAYSIZE(szNew), pszPath + oldLen);
-            SetTreeItemPath(hItem, szNew);
-        }
-
-        TreeUpdateItemPathPrefix(TreeView_GetChild(g_hWndTree, hItem),
-                                 lpOldPrefix, lpNewPrefix);
-
-        hItem = TreeView_GetNextSibling(g_hWndTree, hItem);
-    }
-}
-
 static void TreeBeginRename(HTREEITEM hItem)
 {
     if (g_hWndTree == NULL || hItem == NULL)
@@ -1741,6 +1703,45 @@ static HTREEITEM TreeSelectionNotRoot(void)
     return hItem;
 }
 
+// Pasta de destino das criacoes no tree: a pasta selecionada; um arquivo
+// selecionado leva a pasta pai; nenhuma selecao usa a raiz.
+static BOOL TreeResolveCreateTargetDirectory(LPWSTR lpDir, int cchDir)
+{
+    HTREEITEM hTarget;
+    WCHAR* pszSel;
+
+    if (lpDir == NULL || cchDir <= 0)
+        return FALSE;
+
+    lpDir[0] = L'\0';
+
+    hTarget = TreeView_GetSelection(g_hWndTree);
+    pszSel = (hTarget != NULL) ? GetTreeItemPath(hTarget) : NULL;
+
+    if (pszSel != NULL)
+    {
+        if (PathIsDirectoryW(pszSel))
+        {
+            StringCchCopyW(lpDir, cchDir, pszSel);
+        }
+        else
+        {
+            StringCchCopyW(lpDir, cchDir, pszSel);
+            PathRemoveFileSpecW(lpDir);
+        }
+    }
+    else
+    {
+        HTREEITEM hRoot = TreeView_GetRoot(g_hWndTree);
+        WCHAR* pszRoot = (hRoot != NULL) ? GetTreeItemPath(hRoot) : NULL;
+
+        if (pszRoot != NULL)
+            StringCchCopyW(lpDir, cchDir, pszRoot);
+    }
+
+    return lpDir[0] != L'\0';
+}
+
 static void TreeCreateNewFile(void)
 {
     WCHAR szDir[MAX_FILE_PATH];
@@ -1755,34 +1756,9 @@ static void TreeCreateNewFile(void)
     if (g_hWndTree == NULL)
         return;
 
-    // A criação acontece na pasta selecionada; arquivo selecionado vai para a
-    // pasta pai; nenhuma seleção usa a raiz.
     wmemset(szDir, 0, ARRAYSIZE(szDir));
-    {
-        HTREEITEM hTarget = TreeView_GetSelection(g_hWndTree);
-        WCHAR* pszSel = (hTarget != NULL) ? GetTreeItemPath(hTarget) : NULL;
 
-        if (pszSel != NULL)
-        {
-            if (PathIsDirectoryW(pszSel))
-                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszSel);
-            else
-            {
-                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszSel);
-                PathRemoveFileSpecW(szDir);
-            }
-        }
-        else
-        {
-            HTREEITEM hRoot = TreeView_GetRoot(g_hWndTree);
-            WCHAR* pszRoot = (hRoot != NULL) ? GetTreeItemPath(hRoot) : NULL;
-
-            if (pszRoot != NULL)
-                StringCchCopyW(szDir, ARRAYSIZE(szDir), pszRoot);
-        }
-    }
-
-    if (szDir[0] == L'\0')
+    if (!TreeResolveCreateTargetDirectory(szDir, ARRAYSIZE(szDir)))
         return;
 
     LoadStringResource(IDS_UNTITLED, szUntitled, ARRAYSIZE(szUntitled));
@@ -1814,11 +1790,78 @@ static void TreeCreateNewFile(void)
     RefreshFileTree();
     EditorOpen(szPath);
 
+    // Garante a pasta de destino expandida para o arquivo novo ficar visivel
+    // e a renomeacao ser iniciada (pasta vazia inicialmente fechada).
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szDir);
+    if (hItem != NULL)
+        TreeView_Expand(g_hWndTree, hItem, TVE_EXPAND);
+
     hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szPath);
     if (hItem != NULL)
     {
         TreeView_SelectItem(g_hWndTree, hItem);
         TreeView_EnsureVisible(g_hWndTree, hItem);
+        TreeBeginRename(hItem);
+    }
+}
+
+// Ctrl+Shift+N com o foco no tree: cria uma pasta vazia na pasta atual
+// (a selecionada, a pai do arquivo selecionado ou a raiz) e inicia a
+// renomeacao no tree, igual a criacao de arquivo.
+static void TreeCreateNewFolder(void)
+{
+    WCHAR szDir[MAX_FILE_PATH];
+    WCHAR szPath[MAX_FILE_PATH];
+    WCHAR szName[MAX_PATH];
+    WCHAR szNewFolder[128];
+    DWORD attrs;
+    int n;
+    HTREEITEM hItem;
+
+    if (g_hWndTree == NULL)
+        return;
+
+    wmemset(szDir, 0, ARRAYSIZE(szDir));
+
+    if (!TreeResolveCreateTargetDirectory(szDir, ARRAYSIZE(szDir)))
+        return;
+
+    LoadStringResource(IDS_TREE_NEWFOLDER, szNewFolder, ARRAYSIZE(szNewFolder));
+
+    // "New folder", "New folder 2"...; ignora os ja usados.
+    for (n = 1; n < 10000; ++n)
+    {
+        if (n == 1)
+            StringCchCopyW(szName, ARRAYSIZE(szName), szNewFolder);
+        else
+            StringCchPrintfW(szName, ARRAYSIZE(szName), L"%s %d", szNewFolder, n);
+
+        JoinTreePath(szPath, ARRAYSIZE(szPath), szDir, szName);
+        attrs = GetFileAttributesW(szPath);
+        if (attrs == INVALID_FILE_ATTRIBUTES)
+            break;
+    }
+    if (n >= 10000)
+        return;
+
+    if (!CreateDirectoryW(szPath, NULL))
+        return;
+
+    TreeUndoRecord(TREE_UNDO_CREATE, szPath, NULL);
+
+    RefreshFileTree();
+
+    // Garante a pasta de destino expandida para a pasta nova ficar visivel.
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szDir);
+    if (hItem != NULL)
+        TreeView_Expand(g_hWndTree, hItem, TVE_EXPAND);
+
+    hItem = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szPath);
+    if (hItem != NULL)
+    {
+        TreeView_SelectItem(g_hWndTree, hItem);
+        TreeView_EnsureVisible(g_hWndTree, hItem);
+        SetFocus(g_hWndTree);
         TreeBeginRename(hItem);
     }
 }
@@ -1839,9 +1882,7 @@ static BOOL HandleTreeEndLabelEdit(NMTVDISPINFOW* ptvdi)
     WCHAR szDir[MAX_FILE_PATH];
     WCHAR szNewPath[MAX_FILE_PATH] = {};
     WCHAR szDesired[MAX_PATH];
-    LPCWSTR lpName;
     BOOL bDir;
-    TVITEMW item = {};
 
     if (ptvdi == NULL || ptvdi->item.hItem == NULL)
         return FALSE;
@@ -1879,62 +1920,21 @@ static BOOL HandleTreeEndLabelEdit(NMTVDISPINFOW* ptvdi)
 
     TreeUpdateOpenDocsRenamed(szOldPath, szNewPath, bDir);
 
-    // Pasta renomeada: atualiza os caminhos dos itens filhos.
-    if (bDir)
-        TreeUpdateItemPathPrefix(TreeView_GetChild(g_hWndTree, ptvdi->item.hItem),
-                                 szOldPath, szNewPath);
-
-    // Atualiza o lParam do item com o caminho novo.
+    // A arvore so e reconstruida depois que a TreeView termina a notificacao.
     {
-        WCHAR* pszOld = GetTreeItemPath(ptvdi->item.hItem);
         WCHAR* pszNewItem = new WCHAR[MAX_FILE_PATH];
 
         if (pszNewItem != NULL)
         {
             StringCchCopyW(pszNewItem, MAX_FILE_PATH, szNewPath);
-            item.mask = TVIF_PARAM;
-            item.hItem = ptvdi->item.hItem;
-            item.lParam = (LPARAM)pszNewItem;
-
-            if (TreeView_SetItem(g_hWndTree, &item) && pszOld != NULL)
-                delete[] pszOld;
-            else
-                delete[] pszNewItem;
+            PostMessageW(g_hWndMain, GetTreeRenameDoneMessage(), 0, (LPARAM)pszNewItem);
         }
-    }
-
-    // Texto e icone.
-    lpName = PathFindFileNameW(szNewPath);
-    item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
-    item.hItem = ptvdi->item.hItem;
-    item.pszText = (LPWSTR)lpName;
-    {
-        int icon = GetTreeIconIndex(szNewPath,
-                                    bDir ? FILE_ATTRIBUTE_DIRECTORY
-                                         : FILE_ATTRIBUTE_NORMAL);
-        item.iImage = icon;
-        item.iSelectedImage = icon;
-    }
-    TreeView_SetItem(g_hWndTree, &item);
-
-    UpdateTreeOpenMarks();
-
-    // Reconstruir a arvore para que nao aparecam estago stale/mescladas
-    // (dois itens com o mesmo nome quando um conflito foi resolvido).
-    RefreshFileTree();
-
-    {
-        HTREEITEM hNew = FindTreeItemByPath(TreeView_GetRoot(g_hWndTree), szNewPath);
-
-        if (hNew != NULL)
+        else
         {
-            TreeView_SelectItem(g_hWndTree, hNew);
-            TreeView_EnsureVisible(g_hWndTree, hNew);
+            RefreshFileTree();
         }
+        return FALSE;   // a TreeView mantem o rotulo; a msg reconstrui a arvore
     }
-    TreeRestoreFocus();
-
-    return TRUE;
 }
 
 #ifndef TVIS_CUT
@@ -2707,6 +2707,13 @@ BOOL HandleTreeAccelerator(MSG* pMsg)
 
     switch (pMsg->wParam)
     {
+    case 'N':
+        if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+        {
+            TreeCreateNewFolder();
+            return TRUE;
+        }
+        return FALSE;    // Ctrl+N normal: o acelerador IDM_NEW roteia pelo foco
     case 'C':
     case 'X':
         hSel = TreeView_GetSelection(g_hWndTree);
@@ -3522,6 +3529,23 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 0;
     }
 
+    // Reconstrucao da arvore adiada pelo TVN_ENDLABELEDITW: a TreeView ja
+    // terminou a notificacao quando isto e processado.
+    if (msg == GetTreeRenameDoneMessage())
+    {
+        WCHAR* pszNewPath = (WCHAR*)lParam;
+
+        RefreshFileTree();
+
+        if (pszNewPath != NULL)
+        {
+            TreeSelectItemByPath(pszNewPath);
+            delete[] pszNewPath;
+        }
+        TreeRestoreFocus();
+        return 0;
+    }
+
     // Reaplica a selecao do nome base depois de a TreeView estabilizar o
     // controle de edicao do rotulo.
     if (msg == GetLabelSelectBaseMessage())
@@ -3854,9 +3878,11 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
             if (hdr->code == TVN_ENDLABELEDITW)
             {
+                // FALSE: a TreeView nao regrava o rotulo por cima dos itens
+                // reconstruidos pela mensagem adiada.
                 BOOL bAccepted = HandleTreeEndLabelEdit((NMTVDISPINFOW*)lParam);
                 SetWindowLongPtrW(hWnd, DWLP_MSGRESULT, bAccepted ? TRUE : FALSE);
-                return TRUE;
+                return bAccepted ? TRUE : FALSE;
             }
 
             if (hdr->code == TVN_BEGINDRAGW)
@@ -3916,6 +3942,24 @@ LRESULT CALLBACK NotbadWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                              ptvkd->wVKey == 'V')
                         HandleTreeClipboardKey(hSel, ptvkd->wVKey);
                 }
+                return 0;
+            }
+
+            if (hdr->code == NM_RETURN)
+            {
+                // ENTER em arquivo abre em nova aba (ou foca a aba). O retorno
+                // TRUE impede o processamento padrao do tree, que nao tem o
+                // que fazer com um arquivo e dispara o beep de tecla errada.
+                HTREEITEM hSel = TreeView_GetSelection(g_hWndTree);
+                WCHAR* pszPath = (hSel != NULL) ? GetTreeItemPath(hSel) : NULL;
+
+                if (pszPath != NULL && !PathIsDirectoryW(pszPath))
+                {
+                    OpenPathFromTree(pszPath);
+                    SetWindowLongPtrW(hWnd, DWLP_MSGRESULT, TRUE);
+                    return TRUE;
+                }
+                // em pasta: o padrao do tree (expandir/recolher)
                 return 0;
             }
 

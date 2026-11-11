@@ -1,0 +1,7 @@
+// Gerado automaticamente por tools\embed_langs.ps1. Nao edite este arquivo.
+// Nome do recurso = nome do arquivo sem .json, maiusculas, "-" -> "_".
+NBLANG_DE RCDATA "../lang/de.json"
+NBLANG_ES RCDATA "../lang/es.json"
+NBLANG_FR RCDATA "../lang/fr.json"
+NBLANG_IT RCDATA "../lang/it.json"
+NBLANG_TR RCDATA "../lang/tr.json"

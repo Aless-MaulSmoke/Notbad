@@ -1397,14 +1397,15 @@ static BOOL EditorLineAtCaretIsBlank(HWND hEdit)
     return TRUE;
 }
 
-// Retangulo da linha do caret quando ela esta vazia; FALSE caso contrario.
-static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
+// Retangulo da linha visual que contem chPos, em coordenadas do cliente.
+// Usa a posicao de texto (e nao o caret atual) para poder recalcular uma
+// faixa ja pintada depois de rolagem ou edicao.
+static BOOL EditorLineRectAt(HWND hEdit, int chPos, RECT* prc)
 {
     int zoomNum = 1;
     int zoomDen = 1;
     POINT pt = {};
     RECT rcView = {};
-    RECT rcClient = {};
     HDC hdc = NULL;
     HGDIOBJ oldFont = NULL;
     TEXTMETRICW tm = {};
@@ -1412,16 +1413,8 @@ static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
 
     if (prc == NULL || hEdit == NULL)
         return FALSE;
-    if (!EditorLineAtCaretIsBlank(hEdit))
-        return FALSE;
 
-    {
-        int selStart = 0;
-        int selEnd = 0;
-
-        GetEditSelection(hEdit, &selStart, &selEnd);
-        SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, selEnd);
-    }
+    SendMessageW(hEdit, EM_POSFROMCHAR, (WPARAM)&pt, chPos);
 
     // Mesmo calculo de altura do caret de bloco.
     SendMessageW(hEdit, EM_GETZOOM, (WPARAM)&zoomNum, (LPARAM)&zoomDen);
@@ -1445,7 +1438,6 @@ static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
         lineHeight = 1;
 
     SendMessageW(hEdit, EM_GETRECT, 0, (LPARAM)&rcView);
-    GetClientRect(hEdit, &rcClient);
 
     if (rcView.left >= rcView.right || rcView.top >= rcView.bottom)
         return FALSE;
@@ -1462,6 +1454,21 @@ static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
         prc->top = rcView.top;
 
     return TRUE;
+}
+
+// Retangulo da linha do caret quando ela esta vazia; FALSE caso contrario.
+static BOOL EditorBlankLineRect(HWND hEdit, RECT* prc)
+{
+    int selStart = 0;
+    int selEnd = 0;
+
+    if (prc == NULL || hEdit == NULL)
+        return FALSE;
+    if (!EditorLineAtCaretIsBlank(hEdit))
+        return FALSE;
+
+    GetEditSelection(hEdit, &selStart, &selEnd);
+    return EditorLineRectAt(hEdit, selEnd, prc);
 }
 
 // Aplica a forma do caret conforme o modo do documento. Chamado quando a
@@ -1488,6 +1495,27 @@ void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
     if (!EditorBlankLineRect(hEdit, &rc))
         return;
 
+    {
+        int selStart = 0;
+        int selEnd = 0;
+
+        GetEditSelection(hEdit, &selStart, &selEnd);
+
+        // Se o WM_PAINT chegou antes do aviso de mudanca de linha, a faixa
+        // antiga ainda esta na tela. Agenda a limpeza dela antes de trocar a
+        // posicao registrada.
+        if (pDoc->bBlankHighlightPainted && pDoc->blankHighlightPos != selEnd)
+        {
+            RECT rcOld = {};
+
+            if (EditorLineRectAt(hEdit, pDoc->blankHighlightPos, &rcOld))
+                InvalidateRect(hEdit, &rcOld, FALSE);
+            InvalidateRect(hEdit, &pDoc->rcBlankHighlight, FALSE);
+        }
+
+        pDoc->blankHighlightPos = selEnd;
+    }
+
     if (s_brushHighlight == NULL)
         s_brushHighlight = CreateSolidBrush(NOTBAD_HIGHLIGHT_COLOR);
 
@@ -1498,6 +1526,9 @@ void EditorPaintEmptyLineHighlight(HWND hEdit, Document* pDoc)
     FillRect(hdc, &rc, s_brushHighlight);
     ShowCaret(hEdit);
     ReleaseDC(hEdit, hdc);
+
+    pDoc->rcBlankHighlight = rc;
+    pDoc->bBlankHighlightPainted = TRUE;
 }
 
 void EditorUpdateCaretShape(HWND hEdit)
@@ -2984,10 +3015,28 @@ void EditorUpdateCurrentLineHighlight(HWND hEdit)
     // A faixa pintada pelo realce de linha vazia nao e conhecida pelo
     // RichEdit: invalida-la aqui faz o WM_PAINT seguinte redesenhar com o
     // estado atual da opcao, seja ligando, desligando ou ao sair da linha.
+    // A faixa anterior tambem precisa ser invalidada, senao fica presa na
+    // tela ao sair de uma linha vazia (o RichEdit nao a apaga sozinho).
+    // Com rolagem (word wrap incluso) rcBlankHighlight fica em coordenadas
+    // antigas; por isso a faixa velha e recalculada pela posicao de texto.
     {
         RECT rcBlank = {};
+        BOOL bBlank = EditorBlankLineRect(hEdit, &rcBlank);
 
-        if (EditorBlankLineRect(hEdit, &rcBlank))
+        if (pDoc->bBlankHighlightPainted)
+        {
+            RECT rcOld = {};
+
+            if (EditorLineRectAt(hEdit, pDoc->blankHighlightPos, &rcOld))
+                InvalidateRect(hEdit, &rcOld, FALSE);
+
+            // Rede de seguranca para quando o layout/texto mudou de modo que
+            // a posicao antiga nao cai mais na mesma linha visual.
+            InvalidateRect(hEdit, &pDoc->rcBlankHighlight, FALSE);
+            pDoc->bBlankHighlightPainted = FALSE;
+        }
+
+        if (bBlank)
             InvalidateRect(hEdit, &rcBlank, FALSE);
     }
 

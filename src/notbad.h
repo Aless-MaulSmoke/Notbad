@@ -86,6 +86,9 @@ struct Document
     int          fgPrevTextLen;   // tamanho do texto na ultima atualizacao (-1 = desconhecido)
     BOOL         bReinterpreted; // encoding trocado por "reinterpretar"; limpo ao salvar/abrir
     BOOL         bOverwrite;     // modo Overwrite (tecla Insert), por documento
+    RECT         rcBlankHighlight;       // faixa da linha vazia pintada manualmente
+    int          blankHighlightPos;      // posicao do texto da faixa de rcBlankHighlight
+    BOOL         bBlankHighlightPainted; // rcBlankHighlight ainda esta na tela
     BOOL         bReplaceAllPending; // ultima acao foi um Replace All em todas as abas
     // Realce de codigo com dois estados independentes:
     //  - edicao: so o paragrafo atual (e o anterior) e refeito, na hora;

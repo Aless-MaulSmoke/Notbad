@@ -1,5 +1,29 @@
 # CHANGELOG IN STEPS
 
+## v1.0.9 - 11/11/2026
+
+### FIXES
+
+#### Editing
+* **Overwrite Cursor on an Empty Last Line:** With Highlight Current Line on, switching to Overwrite mode on a new, empty last line no longer leaves the old Insert cursor stuck on screen. Only the Overwrite cursor is shown.
+* **Highlight on Empty Lines:** Highlight Current Line (`Ctrl+Shift+L`) now works when the cursor is on an empty line, and the whole line is shown highlighted.
+* **Last Line Highlight:** Moving away from the last empty line with PgUp or Ctrl+Home no longer leaves it highlighted.
+
+#### File Tree
+* **Renaming Files:** Renaming a file no longer changes the name of the folder above it on screen.
+
+### IMPLEMENTATIONS
+
+#### Language
+* **Integrated Translations:** The language JSON files were compiled in Notbad and are part of the application itself. The attached JSONs were: (en, de, es, fr, it, pt, tr). If the language you need is not in this list, you can create the translation JSON file inside the \lang folder from the Notbad executable; languages ​​in this folder have priority over compiled languages.
+
+#### File Tree
+* **New Folder:** With the File Tree in focus, press `Ctrl+Shift+N` to create a new folder in the current location.
+* **Open with Enter:** Press Enter on a file in the File Tree to open it in a new tab.
+
+---
+
+
 ## v1.0.8 - 11/09/2026
 
 ### FIXES

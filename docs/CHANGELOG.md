@@ -1,5 +1,16 @@
 # CHANGELOG IN STEPS
 
+## v1.0.91 - 11/11/2026
+
+### FIXES
+
+#### Editing
+* **Stuck Highlight on Empty Lines:** With Highlight Current Line enabled, moving the cursor with the keyboard no longer leaves previously visited empty lines permanently highlighted after the cursor has moved away.
+* **Stuck Highlight with Word Wrap:** The same stuck highlight no longer occurs with Word Wrap enabled when scrolling through a long document. The highlight now follows the text position, so empty lines are cleared correctly even after the view scrolls.
+
+---
+
+
 ## v1.0.9 - 11/11/2026
 
 ### FIXES

@@ -18,7 +18,7 @@
 #define NOTBAD_NAME        L"Notbad"
 #define NOTBAD_CLASS       L"Notbad"
 #define NOTBAD_LINENUMBERS_CLASS L"NotbadLineNumbers"
-#define NOTBAD_VERSION     L"1.0.9"
+#define NOTBAD_VERSION     L"1.0.91"
 #define NOTBAD_HELP_URL    L"https://aless-maulsmoke.github.io/Notbad/"
 #define NOTBAD_VERSION_URL L"https://aless-maulsmoke.github.io/Notbad/version.html"
 #define NOTBAD_RELEASES_URL L"https://github.com/Aless-MaulSmoke/Notbad/releases"

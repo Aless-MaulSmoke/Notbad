@@ -165,7 +165,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_ABOUT_IMAGE, "Static", SS_BITMAP | SS_REALSIZECONTROL, 12, 12, 64, 64
     LTEXT           "Notbad", IDC_ABOUT_NAME, 88, 14, 240, 14
-    LTEXT           "Version 1.0.8", IDC_ABOUT_VERSION, 88, 30, 240, 10
+    LTEXT           "Version 1.0.91", IDC_ABOUT_VERSION, 88, 30, 240, 10
     LTEXT           "A modern and ""notbad"" reimagining of the traditional notepad text editor, keeping the lightweight soul you love with the power features you need.", IDC_ABOUT_COPYRIGHT, 88, 48, 240, 44
     LTEXT           "Project Team:", IDC_ABOUT_TEAM_LABEL, 12, 112, 316, 10
     LTEXT           "* Aless MaulSmoke: Project Manager | Concept | Code Review", IDC_ABOUT_TEAM1, 16, 128, 312, 10
@@ -242,11 +242,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Notbad"
             VALUE "FileDescription", "Notbad"
-            VALUE "FileVersion", "1.0.8.0"
+            VALUE "FileVersion", "1.0.91.0"
             VALUE "InternalName", "Notbad"
             VALUE "OriginalFilename", "Notbad.exe"
             VALUE "ProductName", "Notbad"
-            VALUE "ProductVersion", "1.0.8.0"
+            VALUE "ProductVersion", "1.0.91.0"
         END
     END
     BLOCK "VarFileInfo"

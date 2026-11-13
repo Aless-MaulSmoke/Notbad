@@ -14,6 +14,10 @@
   --mono:Consolas,"Cascadia Mono","SFMono-Regular",Menlo,monospace;
   --sans:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
 }
+@media (prefers-color-scheme:dark){
+  :root{--desk:#14161a; --win:#2a2d33; --paper:#1d2025; --ink:#e6e8eb; --muted:#9aa1ab;
+    --line:#3a3e46; --accent:#6aa3f5; --accent-soft:#22314a; --code:#262a31; --tab2:#8a8f98;}
+}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:calc(var(--topbar-h,90px) + 16px)}
 body{margin:0;background:var(--desk);color:var(--ink);font:16px/1.65 var(--sans)}
@@ -29,9 +33,9 @@ a{color:var(--accent)}
 .gh:hover{background:var(--accent-soft);color:var(--accent)}
 .logo i{font-style:normal;color:var(--logo-blue)}
 .tabs{display:flex;gap:2px;padding:6px 10px 0;border-bottom:1px solid var(--line);overflow-x:auto}
-.tabs a{display:block;padding:6px 14px;font-size:13.5px;text-decoration:none;color:var(--muted);border:1px solid transparent;border-bottom:0;border-radius:4px 4px 0 0;border-top:3px solid var(--c);white-space:nowrap}
+.tabs a{display:block;padding:6px 14px;font-size:13.5px;text-decoration:none;color:var(--muted);border:1px solid var(--line);border-bottom:0;border-radius:4px 4px 0 0;border-top:3px solid var(--c);white-space:nowrap}
 .tabs a:nth-child(1){--c:var(--tab1)}.tabs a:nth-child(2){--c:var(--tab2)}.tabs a:nth-child(3){--c:var(--tab3)}
-.tabs a[aria-current]{background:var(--paper);color:var(--ink);border-color:var(--line)}
+.tabs a[aria-current]{background:var(--paper);color:var(--ink);border-color:var(--line);border-top-color:var(--c)}
 
 .body{display:grid;grid-template-columns:250px minmax(0,1fr);background:var(--paper)}
 nav.tree{background:var(--win);border-right:1px solid var(--line);padding:18px 14px;font-size:18px;}
@@ -41,6 +45,8 @@ nav.tree ul ul{margin-left:14px;border-left:1px solid var(--line);padding-left:1
 nav.tree a{display:block;padding:3px 6px;border-radius:3px;color:var(--ink);text-decoration:none}
 nav.tree a:hover{background:var(--accent-soft)}
 nav.tree a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main img{width:200px}
+
 main{padding:36px clamp(20px,5vw,56px) 56px;max-width:820px}
 #notbad {
     display: grid;
